@@ -23,17 +23,17 @@ sec_col = sec_db[COLLECTION_NAME]
 async def save_file(media):
     """Save file in the database."""
     
-    file_id = unpack_new_file_id(media.file_id)
+    file_ref = unpack_new_file_id(media.file_id)
     file_name = clean_file_name(media.file_name)
     
     file = {
-        'file_id': file_id,
+        'file_ref': file_ref,
         'file_name': file_name,
         'file_size': media.file_size,
         'caption': media.caption.html if media.caption else None
     }
 
-    if is_file_already_saved(file_id, file_name):
+    if is_file_already_saved(file_ref, file_name):
         return False, 0
 
     try:
@@ -65,10 +65,10 @@ def clean_file_name(file_name):
         
     return ' '.join(filter(lambda x: not x.startswith('@') and not x.startswith('http') and not x.startswith('www.') and not x.startswith('t.me'), file_name.split()))
 
-def is_file_already_saved(file_id, file_name):
+def is_file_already_saved(file_ref, file_name):
     """Check if the file is already saved in either collection."""
     found1 = {'file_name': file_name}
-    found = {'file_id': file_id}
+    found = {'file_ref': file_ref}
 
     for collection in [col, sec_col]:
         if collection.find_one(found1) or collection.find_one(found):
@@ -145,7 +145,7 @@ async def get_bad_files(query, file_type=None, use_filter=False):
     return files, total_results
 
 async def get_file_details(query):
-    return col.find_one({'file_id': query}) or sec_col.find_one({'file_id': query})
+    return col.find_one({'file_ref': query}) or sec_col.find_one({'file_ref': query})
 
 def encode_file_id(s: bytes) -> str:
     r = b""

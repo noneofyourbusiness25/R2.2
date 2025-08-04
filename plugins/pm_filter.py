@@ -114,10 +114,10 @@ async def next_page(bot, query):
         btn = [
             [
                 InlineKeyboardButton(
-                    text=f"[{get_size(file['file_size'])}] {' '.join(filter(lambda x: not x.startswith('[') and not x.startswith('@') and not x.startswith('www.'), file['file_name'].split()))}", callback_data=f'{pre}#{file["file_id"]}'
+                    text=f"[{get_size(file['file_size'])}] {' '.join(filter(lambda x: not x.startswith('[') and not x.startswith('@') and not x.startswith('www.'), file['file_name'].split()))}", callback_data=f'{pre}#{file["file_ref"]}'
                 ),
             ]
-            for file in files if 'file_id' in file and 'file_name' in file and 'file_size' in file
+            for file in files if 'file_ref' in file and 'file_name' in file and 'file_size' in file
         ]
 
         btn.insert(0, 
@@ -352,10 +352,10 @@ async def filter_yearss_cb_handler(client: Client, query: CallbackQuery):
         btn = [
             [
                 InlineKeyboardButton(
-                    text=f"[{get_size(file['file_size'])}] {' '.join(filter(lambda x: not x.startswith('[') and not x.startswith('@') and not x.startswith('www.'), file['file_name'].split()))}", callback_data=f'{pre}#{file["file_id"]}'
+                    text=f"[{get_size(file['file_size'])}] {' '.join(filter(lambda x: not x.startswith('[') and not x.startswith('@') and not x.startswith('www.'), file['file_name'].split()))}", callback_data=f'{pre}#{file["file_ref"]}'
                 ),
             ]
-            for file in files if 'file_id' in file and 'file_name' in file and 'file_size' in file
+            for file in files if 'file_ref' in file and 'file_name' in file and 'file_size' in file
         ]
         btn.insert(0, 
             [
@@ -518,10 +518,10 @@ async def filter_episodes_cb_handler(client: Client, query: CallbackQuery):
         btn = [
             [
                 InlineKeyboardButton(
-                    text=f"[{get_size(file['file_size'])}] {' '.join(filter(lambda x: not x.startswith('[') and not x.startswith('@') and not x.startswith('www.'), file['file_name'].split()))}", callback_data=f'{pre}#{file["file_id"]}'
+                    text=f"[{get_size(file['file_size'])}] {' '.join(filter(lambda x: not x.startswith('[') and not x.startswith('@') and not x.startswith('www.'), file['file_name'].split()))}", callback_data=f'{pre}#{file["file_ref"]}'
                 ),
             ]
-            for file in files if 'file_id' in file and 'file_name' in file and 'file_size' in file
+            for file in files if 'file_ref' in file and 'file_name' in file and 'file_size' in file
         ]
         btn.insert(0, 
             [
@@ -686,10 +686,10 @@ async def filter_languages_cb_handler(client: Client, query: CallbackQuery):
         btn = [
             [
                 InlineKeyboardButton(
-                    text=f"[{get_size(file['file_size'])}] {' '.join(filter(lambda x: not x.startswith('[') and not x.startswith('@') and not x.startswith('www.'), file['file_name'].split()))}", callback_data=f'{pre}#{file["file_id"]}'
+                    text=f"[{get_size(file['file_size'])}] {' '.join(filter(lambda x: not x.startswith('[') and not x.startswith('@') and not x.startswith('www.'), file['file_name'].split()))}", callback_data=f'{pre}#{file["file_ref"]}'
                 ),
             ]
-            for file in files if 'file_id' in file and 'file_name' in file and 'file_size' in file
+            for file in files if 'file_ref' in file and 'file_name' in file and 'file_size' in file
         ]
         btn.insert(0, 
             [
@@ -883,10 +883,10 @@ async def filter_seasons_cb_handler(client: Client, query: CallbackQuery):
         btn = [
             [
                 InlineKeyboardButton(
-                    text=f"[{get_size(file['file_size'])}] {' '.join(filter(lambda x: not x.startswith('[') and not x.startswith('@') and not x.startswith('www.'), file['file_name'].split()))}", callback_data=f'{pre}#{file["file_id"]}'
+                    text=f"[{get_size(file['file_size'])}] {' '.join(filter(lambda x: not x.startswith('[') and not x.startswith('@') and not x.startswith('www.'), file['file_name'].split()))}", callback_data=f'{pre}#{file["file_ref"]}'
                 ),
             ]
-            for file in files if 'file_id' in file and 'file_name' in file and 'file_size' in file
+            for file in files if 'file_ref' in file and 'file_name' in file and 'file_size' in file
         ]
         btn.insert(0, 
             [
@@ -1021,10 +1021,10 @@ async def filter_qualities_cb_handler(client: Client, query: CallbackQuery):
         btn = [
             [
                 InlineKeyboardButton(
-                    text=f"[{get_size(file['file_size'])}] {' '.join(filter(lambda x: not x.startswith('[') and not x.startswith('@') and not x.startswith('www.'), file['file_name'].split()))}", callback_data=f'{pre}#{file["file_id"]}'
+                    text=f"[{get_size(file['file_size'])}] {' '.join(filter(lambda x: not x.startswith('[') and not x.startswith('@') and not x.startswith('www.'), file['file_name'].split()))}", callback_data=f'{pre}#{file["file_ref"]}'
                 ),
             ]
-            for file in files if 'file_id' in file and 'file_name' in file and 'file_size' in file
+            for file in files if 'file_ref' in file and 'file_name' in file and 'file_size' in file
         ]
         btn.insert(0, 
             [
@@ -2599,10 +2599,10 @@ async def auto_filter(client, name, msg, reply_msg, ai_search, spoll=False):
         btn = [
             [
                 InlineKeyboardButton(
-                    text=f"[{get_size(file['file_size'])}] {' '.join(filter(lambda x: not x.startswith('[') and not x.startswith('@') and not x.startswith('www.'), file['file_name'].split()))}", callback_data=f'{pre}#{file["file_id"]}'
+                    text=f"[{get_size(file['file_size'])}] {' '.join(filter(lambda x: not x.startswith('[') and not x.startswith('@') and not x.startswith('www.'), file['file_name'].split()))}", callback_data=f'{pre}#{file["file_ref"]}'
                 ),
             ]
-            for file in files if 'file_id' in file and 'file_name' in file and 'file_size' in file
+            for file in files if 'file_ref' in file and 'file_name' in file and 'file_size' in file
         ]
         btn.insert(0, 
             [
