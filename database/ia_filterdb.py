@@ -20,20 +20,19 @@ sec_client = MongoClient(SEC_FILE_DB_URI)
 sec_db = sec_client[DATABASE_NAME]
 sec_col = sec_db[COLLECTION_NAME]
 
+
 # Ensure indexes exist for faster queries
 col.create_index([('file_name', 'text')])
 if MULTIPLE_DATABASE:
     sec_col.create_index([('file_name', 'text')])
 
 async def save_file(media):
-    """
-    Save a single file in the database.
-    This function is required by plugins/channel.py and is now restored.
-    """
-    file_id = unpack_new_file_id(media.file_id)
+    """Save a single file in the database (for channel updates)."""
+    file_id, file_ref = unpack_new_file_id(media.file_id)
     file_name = clean_file_name(media.file_name)
     file = {
-        '_id': file_id,
+        'file_id': file_id,
+        'file_ref': file_ref,
         'file_name': file_name,
         'file_size': media.file_size,
         'caption': media.caption.html if media.caption else None
@@ -45,18 +44,8 @@ async def save_file(media):
         return False, 0
     except Exception as e:
         logger.error(f"Error saving single file {file_name}: {e}")
-        if MULTIPLE_DATABASE:
-            try:
-                sec_col.insert_one(file)
-            except DuplicateKeyError:
-                return False, 0
-            except Exception as se:
-                logger.error(f"Error saving single file to secondary DB: {se}")
-                return False, 2
-        else:
-            return False, 2
-    else:
-        return True, 1
+        return False, 2
+
 
 async def save_files(files):
     """Save multiple files in the database for batch indexing."""
@@ -64,6 +53,7 @@ async def save_files(files):
     for file_info in files:
         doc = {
             '_id': file_info['file_id'],
+            'file_ref': file_info['file_ref'],
             'file_name': file_info['file_name'],
             'file_size': file_info['file_size'],
             'caption': file_info['caption']
@@ -81,7 +71,7 @@ async def save_files(files):
     except BulkWriteError as e:
         successful_inserts = e.details.get('nInserted', 0)
         for error in e.details.get('writeErrors', []):
-            if error.get('code') == 11000:
+            if error.get('code') == 11000:  # Code for duplicate key error
                 duplicates += 1
             else:
                 errors += 1
@@ -100,7 +90,7 @@ def clean_file_name(file_name):
 async def get_search_results(chat_id, query, file_type=None, max_results=10, offset=0, filter=False):
     """For given query return (results, next_offset)"""
     query = query.strip()
-
+    
     # Restored the original, more accurate search logic
     if not query:
         raw_pattern = '.'
@@ -116,7 +106,7 @@ async def get_search_results(chat_id, query, file_type=None, max_results=10, off
         
     filter_criteria = {'file_name': regex}
     
-    # This is the fix for the search crash. It correctly retrieves the list.
+    # This is the fix for the search crash.
     cursor = col.find(filter_criteria).sort('$natural', -1).skip(offset).limit(max_results)
     files = list(cursor) 
 
@@ -132,7 +122,7 @@ async def get_search_results(chat_id, query, file_type=None, max_results=10, off
     return files, next_offset, total_results
 
 async def get_bad_files(query, file_type=None, use_filter=False):
-    """This function is required by other plugins and is now restored."""
+    """Function required by other plugins, now restored."""
     query = query.strip()
     raw_pattern = query.replace(' ', r'.*[s.+-_]')
     try:
@@ -155,9 +145,9 @@ async def get_bad_files(query, file_type=None, use_filter=False):
     return files, total_results
 
 async def get_file_details(query):
-    result = col.find_one({'_id': query})
+    result = col.find_one({'file_id': query})
     if not result and MULTIPLE_DATABASE:
-        result = sec_col.find_one({'_id': query})
+        result = sec_col.find_one({'file_id': query})
     return result
 
 def encode_file_id(s: bytes) -> str:
@@ -171,9 +161,9 @@ def encode_file_id(s: bytes) -> str:
     return base64.urlsafe_b64encode(r).decode().rstrip("=")
 
 def unpack_new_file_id(new_file_id):
-    """Return only the file_id string, which is what the schema expects."""
+    """Return file_id and file_ref"""
     decoded = FileId.decode(new_file_id)
     file_id = encode_file_id(
         pack("<iiqq", int(decoded.file_type), decoded.dc_id, decoded.media_id, decoded.access_hash)
     )
-    return file_id
+    return file_id, decoded.file_reference if decoded.file_reference else b""
