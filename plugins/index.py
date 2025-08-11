@@ -13,10 +13,10 @@ from database.ia_filterdb import save_files, unpack_new_file_id
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
 lock = asyncio.Lock()
 
-# ... (The first half of the file, including 'send_for_index', remains unchanged) ...
+# ... (The first part of the file, send_for_index etc., remains the same) ...
+
 @Client.on_callback_query(filters.regex(r'^index'))
 async def index_files(bot, query):
     if query.data.startswith('index_cancel'):
@@ -164,11 +164,11 @@ async def index_files_to_db(lst_msg_id, chat, msg, bot):
                     continue
                 
                 media.caption = message.caption
-                # --- FIX: Only use the file_id, no file_ref ---
-                file_id = unpack_new_file_id(media.file_id)
+                file_id, file_ref = unpack_new_file_id(media.file_id)
                 
                 files_to_save.append({
                     'file_id': file_id,
+                    'file_ref': file_ref,
                     'file_name': re.sub(r"(_|\-|\.|\+)", " ", str(getattr(media, 'file_name', ''))),
                     'file_size': media.file_size,
                     'caption': media.caption.html if media.caption else None
@@ -184,7 +184,7 @@ async def index_files_to_db(lst_msg_id, chat, msg, bot):
                 if current % 30 == 0:
                     try:
                         await msg.edit_text(
-                            text=f"Total messages fetched: <code>{current}</code>\nSaved: <code>{total_files}</code>\nDuplicates: <code>{duplicate}</code> | Errors: <code>{errors}</code>",
+                            text=f"Fetched: <code>{current}</code> | Saved: <code>{total_files}</code> | Duplicates: <code>{duplicate}</code> | Errors: <code>{errors}</code>",
                         )
                     except (MessageNotModified, MessageIdInvalid):
                         pass
@@ -197,12 +197,8 @@ async def index_files_to_db(lst_msg_id, chat, msg, bot):
 
         except Exception as e:
             logger.exception(e)
-            try:
-                await msg.edit(f'Error: {e}')
-            except MessageIdInvalid:
-                pass
+            try: await msg.edit(f'Error: {e}')
+            except MessageIdInvalid: pass
         finally:
-            try:
-                await msg.edit(f'Successfully saved <code>{total_files}</code> files!\nDuplicates: <code>{duplicate}</code> | Errors: <code>{errors}</code>')
-            except MessageIdInvalid:
-                pass
+            try: await msg.edit(f'Successfully saved <code>{total_files}</code> files!\nDuplicates: <code>{duplicate}</code> | Errors: <code>{errors}</code>')
+            except MessageIdInvalid: pass
