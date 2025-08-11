@@ -20,13 +20,17 @@ sec_client = MongoClient(SEC_FILE_DB_URI)
 sec_db = sec_client[DATABASE_NAME]
 sec_col = sec_db[COLLECTION_NAME]
 
+col.create_index([('file_name', 'text')])
+if MULTIPLE_DATABASE:
+    sec_col.create_index([('file_name', 'text')])
 
 async def save_files(files):
-    """Save multiple files in the database without adding file_ref."""
+    """Save multiple files in the database."""
     documents_to_insert = []
     for file_info in files:
+        # This structure does NOT use file_ref, keeping your DB schema the same.
         doc = {
-            '_id': file_info['file_id'], # Using file_id as the unique _id
+            '_id': file_info['file_id'],
             'file_name': file_info['file_name'],
             'file_size': file_info['file_size'],
             'caption': file_info['caption']
@@ -44,7 +48,7 @@ async def save_files(files):
     except BulkWriteError as e:
         successful_inserts = e.details.get('nInserted', 0)
         for error in e.details.get('writeErrors', []):
-            if error.get('code') == 11000:  # Code for duplicate key error
+            if error.get('code') == 11000:
                 duplicates += 1
             else:
                 errors += 1
@@ -62,12 +66,7 @@ def clean_file_name(file_name):
 
 async def get_search_results(chat_id, query, file_type=None, max_results=10, offset=0, filter=False):
     query = query.strip()
-    if not query:
-        raw_pattern = '.'
-    elif ' ' not in query:
-        raw_pattern = r'(\b|[\.\+\-_])' + re.escape(query) + r'(\b|[\.\+\-_])'
-    else:
-        raw_pattern = query.replace(' ', r'.*[\s\.\+\-_]')
+    raw_pattern = query.replace(' ', r'.*[\s\.\+\-_]')
     try:
         regex = re.compile(raw_pattern, flags=re.IGNORECASE)
     except:
@@ -75,8 +74,6 @@ async def get_search_results(chat_id, query, file_type=None, max_results=10, off
         
     filter_criteria = {'file_name': regex}
     
-    # --- THIS IS THE FIX for "no results" error ---
-    # Use synchronous methods that return a list directly, avoiding the crash.
     cursor = col.find(filter_criteria).sort('$natural', -1).skip(offset).limit(max_results)
     files = list(cursor) 
 
@@ -90,6 +87,30 @@ async def get_search_results(chat_id, query, file_type=None, max_results=10, off
         
     next_offset = offset + max_results if total_results > offset + max_results else ""
     return files, next_offset, total_results
+
+async def get_bad_files(query, file_type=None, use_filter=False):
+    """This function is required by other parts of the bot and is now restored."""
+    query = query.strip()
+    if not query: raw_pattern = '.'
+    else: raw_pattern = query.replace(' ', r'.*[s.+-_]')
+    try:
+        regex = re.compile(raw_pattern, flags=re.IGNORECASE)
+    except re.error:
+        return [], 0
+    
+    filter_criteria = {'file_name': regex}
+    if USE_CAPTION_FILTER:
+        filter_criteria = {'$or': [filter_criteria, {'caption': regex}]}
+        
+    total_results = col.count_documents(filter_criteria)
+    if MULTIPLE_DATABASE:
+        total_results += sec_col.count_documents(filter_criteria)
+        
+    files = list(col.find(filter_criteria))
+    if MULTIPLE_DATABASE:
+        files.extend(list(sec_col.find(filter_criteria)))
+        
+    return files, total_results
 
 async def get_file_details(query):
     result = col.find_one({'_id': query})
@@ -108,7 +129,7 @@ def encode_file_id(s: bytes) -> str:
     return base64.urlsafe_b64encode(r).decode().rstrip("=")
 
 def unpack_new_file_id(new_file_id):
-    """Return only the file_id string"""
+    """Return only the file_id string, not the file_ref."""
     decoded = FileId.decode(new_file_id)
     file_id = encode_file_id(
         pack("<iiqq", int(decoded.file_type), decoded.dc_id, decoded.media_id, decoded.access_hash)
