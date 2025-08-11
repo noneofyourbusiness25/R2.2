@@ -11,7 +11,7 @@ from info import FILE_DB_URI, SEC_FILE_DB_URI, DATABASE_NAME, COLLECTION_NAME, M
 
 logger = logging.getLogger(__name__)
 
-# Using the synchronous PyMongo driver consistently
+# Using the synchronous PyMongo driver consistently for stability
 client = MongoClient(FILE_DB_URI)
 db = client[DATABASE_NAME]
 col = db[COLLECTION_NAME]
@@ -20,13 +20,16 @@ sec_client = MongoClient(SEC_FILE_DB_URI)
 sec_db = sec_client[DATABASE_NAME]
 sec_col = sec_db[COLLECTION_NAME]
 
-
+# Ensure indexes exist for faster queries
 col.create_index([('file_name', 'text')])
 if MULTIPLE_DATABASE:
     sec_col.create_index([('file_name', 'text')])
 
 async def save_file(media):
-    """Save a single file in the database. (Restored for channel.py)"""
+    """
+    Save a single file in the database.
+    This function is required by plugins/channel.py and is now restored.
+    """
     file_id = unpack_new_file_id(media.file_id)
     file_name = clean_file_name(media.file_name)
     file = {
@@ -38,18 +41,17 @@ async def save_file(media):
     try:
         col.insert_one(file)
     except DuplicateKeyError:
-        logger.warning(f"Duplicate file found: {file_name}")
+        logger.warning(f"Duplicate file (single save): {file_name}")
         return False, 0
     except Exception as e:
-        logger.error(f"Error saving file {file_name}: {e}")
+        logger.error(f"Error saving single file {file_name}: {e}")
         if MULTIPLE_DATABASE:
             try:
                 sec_col.insert_one(file)
             except DuplicateKeyError:
-                logger.warning(f"Duplicate file found in secondary DB: {file_name}")
                 return False, 0
             except Exception as se:
-                logger.error(f"Error saving file to secondary DB: {se}")
+                logger.error(f"Error saving single file to secondary DB: {se}")
                 return False, 2
         else:
             return False, 2
@@ -96,8 +98,17 @@ def clean_file_name(file_name):
     return ' '.join(filter(lambda x: not x.startswith('@'), file_name.split()))
 
 async def get_search_results(chat_id, query, file_type=None, max_results=10, offset=0, filter=False):
+    """For given query return (results, next_offset)"""
     query = query.strip()
-    raw_pattern = query.replace(' ', r'.*[\s\.\+\-_]')
+
+    # Restored the original, more accurate search logic
+    if not query:
+        raw_pattern = '.'
+    elif ' ' not in query:
+        raw_pattern = r'(\b|[\.\+\-_])' + re.escape(query) + r'(\b|[\.\+\-_])'
+    else:
+        raw_pattern = query.replace(' ', r'.*[\s\.\+\-_]')
+    
     try:
         regex = re.compile(raw_pattern, flags=re.IGNORECASE)
     except:
@@ -105,6 +116,7 @@ async def get_search_results(chat_id, query, file_type=None, max_results=10, off
         
     filter_criteria = {'file_name': regex}
     
+    # This is the fix for the search crash. It correctly retrieves the list.
     cursor = col.find(filter_criteria).sort('$natural', -1).skip(offset).limit(max_results)
     files = list(cursor) 
 
@@ -120,7 +132,7 @@ async def get_search_results(chat_id, query, file_type=None, max_results=10, off
     return files, next_offset, total_results
 
 async def get_bad_files(query, file_type=None, use_filter=False):
-    """Function to find files for deletion."""
+    """This function is required by other plugins and is now restored."""
     query = query.strip()
     raw_pattern = query.replace(' ', r'.*[s.+-_]')
     try:
@@ -159,7 +171,7 @@ def encode_file_id(s: bytes) -> str:
     return base64.urlsafe_b64encode(r).decode().rstrip("=")
 
 def unpack_new_file_id(new_file_id):
-    """Return only the file_id string"""
+    """Return only the file_id string, which is what the schema expects."""
     decoded = FileId.decode(new_file_id)
     file_id = encode_file_id(
         pack("<iiqq", int(decoded.file_type), decoded.dc_id, decoded.media_id, decoded.access_hash)
