@@ -153,7 +153,7 @@ async def index_files_to_db(lst_msg_id, chat, msg, bot):
             temp.CANCEL = False
             async for message in bot.iter_messages(chat, lst_msg_id, temp.CURRENT):
                 if temp.CANCEL:
-                    await msg.edit(f"Successfully Cancelled!\n\nProcessing remaining files...")
+                    await msg.edit("Successfully Cancelled!\n\nProcessing remaining files...")
                     break
                 current += 1
                 if message.empty:
@@ -172,7 +172,7 @@ async def index_files_to_db(lst_msg_id, chat, msg, bot):
                     continue
 
                 media.caption = message.caption
-                file_id, _ = unpack_new_file_id(media.file_id)
+                file_id = unpack_new_file_id(media.file_id)
                 
                 files_to_save.append({
                     'file_id': file_id,
