@@ -58,7 +58,12 @@ async def answer(bot, query):
 
     offset = int(query.offset or 0)
     reply_markup = get_reply_markup(query=string)
-    files, next_offset, total = await get_search_results(chat_id, string, file_type=file_type, max_results=10, offset=offset)
+    logger.info(f"Inline search invoked | user_id={getattr(query.from_user, 'id', None)} | chat_id={chat_id} | query='{string}' | file_type={file_type} | offset={offset}")
+    try:
+        files, next_offset, total = await get_search_results(chat_id, string, file_type=file_type, max_results=10, offset=offset)
+    except Exception:
+        logger.exception(f"get_search_results raised exception | chat_id={chat_id} | query='{string}' | file_type={file_type} | offset={offset}")
+        files, next_offset, total = [], 0, 0
 
     for file in files:
         title=file['file_name']
@@ -100,6 +105,7 @@ async def answer(bot, query):
         except Exception as e:
             logging.exception(str(e))
     else:
+        logger.error(f"Inline ZERO RESULTS | user_id={getattr(query.from_user, 'id', None)} | chat_id={chat_id} | query='{string}' | file_type={file_type} | offset={offset}")
         switch_pm_text = f'{emoji.CROSS_MARK} No results'
         if string:
             switch_pm_text += f' for "{string}"'

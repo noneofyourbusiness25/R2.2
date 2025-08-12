@@ -8,7 +8,7 @@ from info import OTHER_DB_URI, DATABASE_NAME
 
 import logging
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.ERROR)
+logger.setLevel(logging.INFO)
 
 myclient = pymongo.MongoClient(OTHER_DB_URI)
 mydb = myclient[DATABASE_NAME]
@@ -56,16 +56,19 @@ async def add_connection(group_id, user_id):
 
         
 async def active_connection(user_id):
-
+    logger.info(f"active_connection lookup | user_id={user_id}")
     query = mycol.find_one(
         { "_id": user_id },
         { "_id": 0, "group_details": 0 }
     )
     if not query:
+        logger.info(f"active_connection result: None for user_id={user_id}")
         return None
 
     group_id = query['active_group']
-    return int(group_id) if group_id != None else None
+    result = int(group_id) if group_id != None else None
+    logger.info(f"active_connection result: {result} for user_id={user_id}")
+    return result
 
 
 async def all_connections(user_id):

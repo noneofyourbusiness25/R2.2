@@ -17,7 +17,7 @@ from database.users_chats_db import db
 from database.ia_filterdb import get_file_details, get_search_results, get_bad_files
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.ERROR)
+logger.setLevel(logging.INFO)
 lock = asyncio.Lock()
 
 BUTTON = {}
@@ -60,12 +60,14 @@ async def next_page(bot, query):
     #    return
 
     files, n_offset, total = await get_search_results(query.message.chat.id, search, offset=offset, filter=True)
+    logger.info(f"Clone next_page | chat_id={query.message.chat.id} | user_id={query.from_user.id} | search='{search}' | offset_in={offset} | next_offset_raw={n_offset} | total={total} | files_returned={len(files) if files else 0}")
     try:
         n_offset = int(n_offset)
     except:
         n_offset = 0
 
     if not files:
+        logger.error(f"Clone next_page ZERO RESULTS | chat_id={query.message.chat.id} | search='{search}' | offset_in={offset}")
         return
     temp.GETALL[key] = files
     temp.SHORT[query.from_user.id] = query.message.chat.id
