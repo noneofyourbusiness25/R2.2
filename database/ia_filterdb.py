@@ -7,7 +7,7 @@ import logging, time
 from struct import pack
 from pyrogram.file_id import FileId
 from pymongo import MongoClient
-from pymongo.errors import DuplicateKeyError
+from pymongo.errors import DuplicateKeyError, BulkWriteError
 from info import FILE_DB_URI, SEC_FILE_DB_URI, DATABASE_NAME, COLLECTION_NAME, MULTIPLE_DATABASE, USE_CAPTION_FILTER, MAX_B_TN
 
 logger = logging.getLogger(__name__)
@@ -26,14 +26,18 @@ sec_col = sec_db[COLLECTION_NAME]
 async def save_file(media):
     """Save file in the database."""
     
-    file_id = unpack_new_file_id(media.file_id)
+    file_id, file_ref = unpack_new_file_id(media.file_id)
     file_name = clean_file_name(media.file_name)
     
     file = {
-        'file_id': file_id,
+        '_id': file_id,
+        'file_ref': file_ref,
         'file_name': file_name,
         'file_size': media.file_size,
-        'caption': media.caption.html if media.caption else None
+        'file_type': media.file_type,
+        'mime_type': media.mime_type,
+        'caption': media.caption.html if media.caption else None,
+        'file_id': file_id
     }
 
     if is_file_already_saved(file_id, file_name):
@@ -61,6 +65,32 @@ async def save_file(media):
                 return False, 0
         else:
             print("Your Current File Database Is Full, Turn On Multiple Database Feature And Add Second File Mongodb To Save File.")
+            return False, 0
+
+async def save_files(files):
+    """Save multiple files in the database."""
+    try:
+        result = col.insert_many(files, ordered=False)
+        return len(result.inserted_ids), 0
+    except BulkWriteError as e:
+        # Count duplicates and other errors
+        duplicates = sum(1 for error in e.details['writeErrors'] if error['code'] == 11000)
+        return e.details['nInserted'], duplicates
+    except Exception as e:
+        logger.exception(f"Primary DB bulk insert failed. Trying secondary DB if enabled.")
+        if MULTIPLE_DATABASE:
+            try:
+                result = sec_col.insert_many(files, ordered=False)
+                return len(result.inserted_ids), 0
+            except BulkWriteError as e:
+                duplicates = sum(1 for error in e.details['writeErrors'] if error['code'] == 11000)
+                return e.details['nInserted'], duplicates
+            except Exception:
+                logger.exception(f"Secondary DB bulk insert failed.")
+                return 0, len(files)
+        else:
+            print("Your Current File Database Is Full, Turn On Multiple Database Feature And Add Second File Mongodb To Save File.")
+            return 0, len(files)
 
 def clean_file_name(file_name):
     """Clean and format the file name."""
@@ -74,11 +104,10 @@ def clean_file_name(file_name):
 
 def is_file_already_saved(file_id, file_name):
     """Check if the file is already saved in either collection."""
-    found1 = {'file_name': file_name}
-    found = {'file_id': file_id}
+    found = {'_id': file_id}
 
     for collection in [col, sec_col]:
-        if collection.find_one(found1) or collection.find_one(found):
+        if collection.find_one(found):
             print(f"{file_name} is already saved.")
             return True
             
@@ -211,7 +240,7 @@ async def get_bad_files(query, file_type=None, use_filter=False):
     return files, total_results
 
 async def get_file_details(query):
-    return col.find_one({'file_id': query}) or sec_col.find_one({'file_id': query})
+    return col.find_one({'_id': query}) or sec_col.find_one({'_id': query})
 
 def encode_file_id(s: bytes) -> str:
     r = b""
@@ -227,7 +256,7 @@ def encode_file_id(s: bytes) -> str:
     return base64.urlsafe_b64encode(r).decode().rstrip("=")
     
 def unpack_new_file_id(new_file_id):
-    """Return file_id"""
+    """Return file_id, file_ref"""
     decoded = FileId.decode(new_file_id)
     file_id = encode_file_id(
         pack(
@@ -238,5 +267,4 @@ def unpack_new_file_id(new_file_id):
             decoded.access_hash
         )
     )
-    return file_id
-    
+    return file_id, decoded.file_reference
