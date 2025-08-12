@@ -24,19 +24,28 @@ from aiohttp import web
 from plugins import web_server
 from plugins.clone import restart_bots
 
+# Import the specific function needed for the periodic saver
+from plugins.channel import save_batch
+
 from TechVJ.bot import TechVJBot
 from TechVJ.util.keepalive import ping_server
 from TechVJ.bot.clients import initialize_clients
 
 ppath = "plugins/*.py"
 files = glob.glob(ppath)
-TechVJBot.start()
+TechVJBot = TechVJBot()
 loop = asyncio.get_event_loop()
 
+async def periodic_save():
+    """Periodically save the file batch to the database every 60 seconds."""
+    while True:
+        await asyncio.sleep(60)
+        await save_batch()
 
 async def start():
     print('\n')
     print('Initalizing Your Bot')
+    await TechVJBot.start()
     bot_info = await TechVJBot.get_me()
     await initialize_clients()
     for name in files:
@@ -50,8 +59,13 @@ async def start():
             spec.loader.exec_module(load)
             sys.modules["plugins." + plugin_name] = load
             print("Tech VJ Imported => " + plugin_name)
+            
     if ON_HEROKU:
         asyncio.create_task(ping_server())
+        
+    # Start the periodic saving task for channel files
+    asyncio.create_task(periodic_save())
+
     b_users, b_chats = await db.get_banned()
     temp.BANNED_USERS = b_users
     temp.BANNED_CHATS = b_chats
@@ -96,4 +110,3 @@ if __name__ == '__main__':
         loop.run_until_complete(start())
     except KeyboardInterrupt:
         logging.info('Service Stopped Bye 👋')
-
