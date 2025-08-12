@@ -3,11 +3,14 @@
 # Ask Doubt on telegram @KingVJ01
 
 import re, base64, json
+import logging, time
 from struct import pack
 from pyrogram.file_id import FileId
 from pymongo import MongoClient
 from pymongo.errors import DuplicateKeyError
 from info import FILE_DB_URI, SEC_FILE_DB_URI, DATABASE_NAME, COLLECTION_NAME, MULTIPLE_DATABASE, USE_CAPTION_FILTER, MAX_B_TN
+
+logger = logging.getLogger(__name__)
 
 # First Database For File Saving 
 client = MongoClient(FILE_DB_URI)
@@ -43,7 +46,8 @@ async def save_file(media):
     except DuplicateKeyError:
         print(f"{file_name} is already saved.")
         return False, 0
-    except:
+    except Exception as e:
+        logger.exception(f"Primary DB insert failed for file '{file_name}' (id={file_id}). Trying secondary DB if enabled.")
         if MULTIPLE_DATABASE:
             try:
                 sec_col.insert_one(file)
@@ -51,6 +55,9 @@ async def save_file(media):
                 return True, 1
             except DuplicateKeyError:
                 print(f"{file_name} is already saved.")
+                return False, 0
+            except Exception:
+                logger.exception(f"Secondary DB insert failed for file '{file_name}' (id={file_id}).")
                 return False, 0
         else:
             print("Your Current File Database Is Full, Turn On Multiple Database Feature And Add Second File Mongodb To Save File.")
@@ -80,6 +87,9 @@ def is_file_already_saved(file_id, file_name):
 async def get_search_results(chat_id, query, file_type=None, max_results=10, offset=0, filter=False):
     """For given query return (results, next_offset)"""
     
+    start_time = time.monotonic()
+    logger.info(f"get_search_results called | chat_id={chat_id} | query='{query}' | file_type={file_type} | max_results={max_results} | offset={offset} | MULTIPLE_DATABASE={MULTIPLE_DATABASE}")
+
     query = query.strip()
     if not query:
         raw_pattern = '.'
@@ -89,27 +99,83 @@ async def get_search_results(chat_id, query, file_type=None, max_results=10, off
         raw_pattern = query.replace(' ', r'.*[\s\.\+\-_]') 
     try:
         regex = re.compile(raw_pattern, flags=re.IGNORECASE)
-    except:
+    except re.error:
+        logger.exception(f"Regex compilation failed for raw_pattern='{raw_pattern}' built from query='{query}'. Falling back to plain string search.")
         regex = query
     filter = {'file_name': regex}
     files = []
+    fetched_primary = 0
+    fetched_secondary = 0
+    primary_count = 0
+    secondary_count = 0
+    error_primary = None
+    error_secondary = None
     if MULTIPLE_DATABASE:
-        cursor1 = col.find(filter).sort('$natural', -1).skip(offset).limit(max_results)
-        cursor2 = sec_col.find(filter).sort('$natural', -1).skip(offset).limit(max_results)
-        
-        for file in cursor1:
-            files.append(file)
-        for file in cursor2:
-            files.append(file)
+        try:
+            cursor1 = col.find(filter).sort('$natural', -1).skip(offset).limit(max_results)
+            for file in cursor1:
+                files.append(file)
+                fetched_primary += 1
+        except Exception as e:
+            error_primary = str(e)
+            logger.exception(f"Primary DB find failed | query='{query}' | pattern='{raw_pattern}' | offset={offset} | limit={max_results}")
+        try:
+            cursor2 = sec_col.find(filter).sort('$natural', -1).skip(offset).limit(max_results)
+            for file in cursor2:
+                files.append(file)
+                fetched_secondary += 1
+        except Exception as e:
+            error_secondary = str(e)
+            logger.exception(f"Secondary DB find failed | query='{query}' | pattern='{raw_pattern}' | offset={offset} | limit={max_results}")
     else:
-        cursor = col.find(filter).sort('$natural', -1).skip(offset).limit(max_results)
-        
-        for file in cursor:
-            files.append(file)
+        try:
+            cursor = col.find(filter).sort('$natural', -1).skip(offset).limit(max_results)
+            for file in cursor:
+                files.append(file)
+                fetched_primary += 1
+        except Exception:
+            error_primary = "primary-only-find-failed"
+            logger.exception(f"Primary DB find failed (single DB mode) | query='{query}' | pattern='{raw_pattern}' | offset={offset} | limit={max_results}")
 
-    total_results = col.count_documents(filter) if not MULTIPLE_DATABASE else (col.count_documents(filter) + sec_col.count_documents(filter))
+    try:
+        primary_count = col.count_documents(filter)
+    except Exception:
+        primary_count = -1
+        logger.exception(f"Primary DB count_documents failed | query='{query}' | pattern='{raw_pattern}'")
+    if MULTIPLE_DATABASE:
+        try:
+            secondary_count = sec_col.count_documents(filter)
+        except Exception:
+            secondary_count = -1
+            logger.exception(f"Secondary DB count_documents failed | query='{query}' | pattern='{raw_pattern}'")
+    total_results = primary_count if not MULTIPLE_DATABASE else (max(0, primary_count) + max(0, secondary_count))
     next_offset = "" if (offset + max_results) >= total_results else (offset + max_results)
 
+    duration_ms = int((time.monotonic() - start_time) * 1000)
+    logger.info(
+        "get_search_results stats | query='%s' | pattern='%s' | total=%s | next_offset=%s | fetched_primary=%s | fetched_secondary=%s | primary_count=%s | secondary_count=%s | errors: primary=%s secondary=%s | duration_ms=%s",
+        query,
+        raw_pattern,
+        total_results,
+        next_offset,
+        fetched_primary,
+        fetched_secondary,
+        primary_count,
+        secondary_count,
+        error_primary,
+        error_secondary,
+        duration_ms,
+    )
+    if total_results == 0:
+        logger.error(
+            "ZERO RESULTS | chat_id=%s | query='%s' | pattern='%s' | offset=%s | limit=%s | MULTIPLE_DATABASE=%s",
+            chat_id,
+            query,
+            raw_pattern,
+            offset,
+            max_results,
+            MULTIPLE_DATABASE,
+        )
     return files, next_offset, total_results
 
 async def get_bad_files(query, file_type=None, use_filter=False):

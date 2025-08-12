@@ -20,7 +20,7 @@ from urllib.parse import quote_plus
 from TechVJ.util.file_properties import get_name, get_hash, get_media_file_size
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.ERROR)
+logger.setLevel(logging.INFO)
 lock = asyncio.Lock()
 
 BUTTON = {}
@@ -66,10 +66,13 @@ async def give_filter(client, message):
                     await auto_filter(client, message.text, message, reply_msg, ai_search)
     else: #a better logic to avoid repeated lines of code in auto_filter function
         search = message.text
+        logger.info(f"Support group quick count | chat_id={message.chat.id} | query='{search.lower()}'")
         temp_files, temp_offset, total_results = await get_search_results(chat_id=message.chat.id, query=search.lower(), offset=0, filter=True)
         if total_results == 0:
+            logger.error(f"Support group ZERO RESULTS | chat_id={message.chat.id} | query='{search.lower()}'")
             return
         else:
+            logger.info(f"Support group RESULTS | chat_id={message.chat.id} | query='{search.lower()}' | total={total_results}")
             return await message.reply_text(f"<b>Hᴇʏ {message.from_user.mention}, {str(total_results)} ʀᴇsᴜʟᴛs ᴀʀᴇ ғᴏᴜɴᴅ ɪɴ ᴍʏ ᴅᴀᴛᴀʙᴀsᴇ ғᴏʀ ʏᴏᴜʀ ᴏ̨ᴜᴇʀʏ {search}. \n\nTʜɪs ɪs ᴀ sᴜᴘᴘᴏʀᴛ ɢʀᴏᴜᴘ sᴏ ᴛʜᴀᴛ ʏᴏᴜ ᴄᴀɴ'ᴛ ɢᴇᴛ ғɪʟᴇs ғʀᴏᴍ ʜᴇʀᴇ...\n\nJᴏɪɴ ᴀɴᴅ Sᴇᴀʀᴄʜ Hᴇʀᴇ - {GRP_LNK}</b>")
 
 @Client.on_message(filters.private & filters.text & filters.incoming)
@@ -99,12 +102,14 @@ async def next_page(bot, query):
        # return
 
     files, n_offset, total = await get_search_results(query.message.chat.id, search, offset=offset, filter=True)
+    logger.info(f"next_page | chat_id={query.message.chat.id} | user_id={query.from_user.id} | search='{search}' | offset_in={offset} | next_offset_raw={n_offset} | total={total} | files_returned={len(files) if files else 0}")
     try:
         n_offset = int(n_offset)
     except:
         n_offset = 0
 
     if not files:
+        logger.error(f"next_page ZERO RESULTS | chat_id={query.message.chat.id} | search='{search}' | offset_in={offset}")
         return
     temp.GETALL[key] = files
     temp.SHORT[query.from_user.id] = query.message.chat.id
@@ -340,9 +345,11 @@ async def filter_yearss_cb_handler(client: Client, query: CallbackQuery):
     if lang != "homepage":
         search = f"{search} {lang}" 
     BUTTONS[key] = search
-
+    logger.info(f"Group filter | handler=filter_yearss_cb_handler | chat_id={chat_id} | search='{search}' | offset=0")
+ 
     files, offset, total_results = await get_search_results(chat_id, search, offset=0, filter=True)
     if not files:
+        logger.error(f"Group filter ZERO RESULTS | handler=filter_yearss_cb_handler | chat_id={chat_id} | search='{search}' | offset=0")
         await query.answer("🚫 𝗡𝗼 𝗙𝗶𝗹𝗲 𝗪𝗲𝗿𝗲 𝗙𝗼𝘂𝗻𝗱 🚫", show_alert=1)
         return
     temp.GETALL[key] = files
@@ -506,9 +513,11 @@ async def filter_episodes_cb_handler(client: Client, query: CallbackQuery):
     if lang != "homepage":
         search = f"{search} {lang}" 
     BUTTONS[key] = search
-
+    logger.info(f"Group filter | handler=filter_episodes_cb_handler | chat_id={chat_id} | search='{search}' | offset=0")
+ 
     files, offset, total_results = await get_search_results(chat_id, search, offset=0, filter=True)
     if not files:
+        logger.error(f"Group filter ZERO RESULTS | handler=filter_episodes_cb_handler | chat_id={chat_id} | search='{search}' | offset=0")
         await query.answer("🚫 𝗡𝗼 𝗙𝗶𝗹𝗲 𝗪𝗲𝗿𝗲 𝗙𝗼𝘂𝗻𝗱 🚫", show_alert=1)
         return
     temp.GETALL[key] = files
@@ -677,6 +686,7 @@ async def filter_languages_cb_handler(client: Client, query: CallbackQuery):
 
     files, offset, total_results = await get_search_results(chat_id, search, offset=0, filter=True)
     if not files:
+        logger.error(f"Group filter ZERO RESULTS | handler=filter_languages_cb_handler | chat_id={chat_id} | search='{search}' | offset=0")
         await query.answer("🚫 𝗡𝗼 𝗙𝗶𝗹𝗲 𝗪𝗲𝗿𝗲 𝗙𝗼𝘂𝗻𝗱 🚫", show_alert=1)
         return
     temp.GETALL[key] = files
@@ -1471,12 +1481,15 @@ async def cb_handler(client: Client, query: CallbackQuery):
       #      await query.answer(script.OLD_ALRT_TXT.format(query.from_user.first_name),show_alert=True)
       #      return
         files, n_offset, total = await get_search_results(query.message.chat.id, search, offset=int(offset), filter=True)
+        logger.info(f"send_fsall part0 | chat_id={query.message.chat.id} | user_id={query.from_user.id} | search='{search}' | offset={offset} | total={total} | returned={len(files) if files else 0}")
         await send_all(client, query.from_user.id, files, ident, query.message.chat.id, query.from_user.first_name, query)
         search = BUTTONS1.get(key)
         files, n_offset, total = await get_search_results(query.message.chat.id, search, offset=int(offset), filter=True)
+        logger.info(f"send_fsall part1 | chat_id={query.message.chat.id} | user_id={query.from_user.id} | search='{search}' | offset={offset} | total={total} | returned={len(files) if files else 0}")
         await send_all(client, query.from_user.id, files, ident, query.message.chat.id, query.from_user.first_name, query)
         search = BUTTONS2.get(key)
         files, n_offset, total = await get_search_results(query.message.chat.id, search, offset=int(offset), filter=True)
+        logger.info(f"send_fsall part2 | chat_id={query.message.chat.id} | user_id={query.from_user.id} | search='{search}' | offset={offset} | total={total} | returned={len(files) if files else 0}")
         await send_all(client, query.from_user.id, files, ident, query.message.chat.id, query.from_user.first_name, query)
         await query.answer(f"Hey {query.from_user.first_name}, All files on this page has been sent successfully to your PM !", show_alert=True)
         
@@ -2575,9 +2588,11 @@ async def auto_filter(client, name, msg, reply_msg, ai_search, spoll=False):
             search = search.replace("-", " ")
             search = search.replace(":", "")
             search = search.replace(".", "")
+            logger.info(f"auto_filter search | chat_id={message.chat.id} | user_id={getattr(message.from_user, 'id', None)} | query='{search}'")
             files, offset, total_results = await get_search_results(message.chat.id ,search, offset=0, filter=True)
             settings = await get_settings(message.chat.id)
             if not files:
+                logger.error(f"auto_filter ZERO RESULTS | chat_id={message.chat.id} | query='{search}'")
                 if settings["spell_check"]:
                     return await advantage_spell_chok(client, name, msg, reply_msg, ai_search)
                 else:
