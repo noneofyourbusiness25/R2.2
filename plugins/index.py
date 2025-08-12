@@ -2,155 +2,214 @@
 # Subscribe YouTube Channel For Amazing Bot @Tech_VJ
 # Ask Doubt on telegram @KingVJ01
 
-import re, base64, json, logging
-from struct import pack
-from pyrogram.file_id import FileId
-import motor.motor_asyncio
-from pymongo.errors import DuplicateKeyError, BulkWriteError
-from info import (
-    DATABASE_NAME,
-    COLLECTION_NAME,
-    FILE_DB_URI,
-    SEC_FILE_DB_URI,
-    MULTIPLE_DATABASE,
-    USE_CAPTION_FILTER,
-)
+import logging, re, asyncio
+from utils import temp
+from info import ADMINS
+from pyrogram import Client, filters, enums
+from pyrogram.errors import FloodWait, MessageNotModified
+from pyrogram.errors.exceptions.bad_request_400 import ChannelInvalid, ChatAdminRequired, UsernameInvalid, UsernameNotModified
+from info import INDEX_REQ_CHANNEL as LOG_CHANNEL
+from database.ia_filterdb import save_files, unpack_new_file_id
+from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+lock = asyncio.Lock()
 
-# Use motor (async) for all database clients
-client = motor.motor_asyncio.AsyncIOMotorClient(FILE_DB_URI)
-db = client[DATABASE_NAME]
-col = db[COLLECTION_NAME]
+@Client.on_callback_query(filters.regex(r'^index'))
+async def index_files(bot, query):
+    if query.data.startswith('index_cancel'):
+        temp.CANCEL = True
+        return await query.answer("Cancelling Indexing")
+    _, raju, chat, lst_msg_id, from_user = query.data.split("#")
+    if raju == 'reject':
+        await query.message.delete()
+        await bot.send_message(
+            int(from_user),
+            f'Your Submission for indexing {chat} has been declined by our moderators.',
+            reply_to_message_id=int(lst_msg_id)
+        )
+        return
 
-sec_client = motor.motor_asyncio.AsyncIOMotorClient(SEC_FILE_DB_URI) if MULTIPLE_DATABASE else None
-sec_db = sec_client[DATABASE_NAME] if sec_client else None
-sec_col = sec_db[COLLECTION_NAME] if sec_db else None
+    if lock.locked():
+        return await query.answer('Wait until previous process complete.', show_alert=True)
+    msg = query.message
 
-# It's good practice to ensure indexes exist on startup
-async def ensure_indexes():
-    await col.create_index([('file_name', 'text')])
-    if MULTIPLE_DATABASE:
-        await sec_col.create_index([('file_name', 'text')])
-
-# Run this once when the module is loaded
-import asyncio
-asyncio.ensure_future(ensure_indexes())
-
-
-async def save_files(files):
-    """Save multiple files in the database and report duplicates."""
-    duplicates = 0
-    errors = 0
-
-    documents_to_insert = []
-    for file_info in files:
-        doc = {
-            '_id': file_info['file_id'], # Use file_id as the unique _id
-            'file_ref': file_info.get('file_ref'), # Store file_ref separately
-            'file_name': file_info['file_name'],
-            'file_size': file_info['file_size'],
-            'file_type': file_info.get('file_type'),
-            'mime_type': file_info.get('mime_type'),
-            'caption': file_info['caption']
-        }
-        documents_to_insert.append(doc)
-
-    if not documents_to_insert:
-        return 0, 0, 0
-
-    try:
-        result = await col.insert_many(documents_to_insert, ordered=False)
-        return len(result.inserted_ids), duplicates, errors
-    except BulkWriteError as e:
-        successful_inserts = e.details.get('nInserted', 0)
-        for error in e.details.get('writeErrors', []):
-            if error.get('code') == 11000:  # Code for duplicate key error
-                duplicates += 1
-            else:
-                errors += 1
-        return successful_inserts, duplicates, errors
-    except Exception as e:
-        logger.error(f"General error saving batch: {e}")
-        if MULTIPLE_DATABASE:
-            # Fallback to secondary DB
-            try:
-                result = await sec_col.insert_many(documents_to_insert, ordered=False)
-                return len(result.inserted_ids), 0, 0
-            except BulkWriteError as se:
-                # Handle errors for secondary DB as well
-                successful_inserts = se.details.get('nInserted', 0)
-                dupes = sum(1 for err in se.details.get('writeErrors', []) if err.get('code') == 11000)
-                errs = len(se.details.get('writeErrors', [])) - dupes
-                return successful_inserts, dupes, errs
-            except Exception as se:
-                logger.error(f"Error saving batch to secondary DB: {se}")
-        return 0, 0, len(documents_to_insert)
-
-def clean_file_name(file_name):
-    file_name = re.sub(r"(_|\-|\.|\+)", " ", str(file_name))
-    unwanted_chars = ['[', ']', '(', ')', '{', '}']
-    for char in unwanted_chars:
-        file_name = file_name.replace(char, '')
-    return ' '.join(filter(lambda x: not x.startswith(('@', 'http', 'www.', 't.me')), file_name.split()))
-
-async def get_search_results(chat_id, query, file_type=None, max_results=10, offset=0, filter=False):
-    query = query.strip()
-    if not query:
-        raw_pattern = '.'
-    else:
-        raw_pattern = query.replace(' ', r'.*[\s\.\+\-_]')
-    
-    try:
-        regex = re.compile(raw_pattern, flags=re.IGNORECASE)
-        filter_criteria = {'file_name': regex}
-    except re.error:
-        filter_criteria = {'file_name': re.escape(query)}
-
-    total_results = await col.count_documents(filter_criteria)
-    if MULTIPLE_DATABASE:
-        total_results += await sec_col.count_documents(filter_criteria)
-
-    files = []
-    cursor = col.find(filter_criteria).sort('$natural', -1).skip(offset).limit(max_results)
-    files.extend(await cursor.to_list(length=max_results))
-
-    if MULTIPLE_DATABASE:
-        cursor2 = sec_col.find(filter_criteria).sort('$natural', -1).skip(offset).limit(max_results)
-        files.extend(await cursor2.to_list(length=max_results))
-        
-    next_offset = offset + max_results if total_results > offset + max_results else ""
-    return files, next_offset, total_results
-
-async def get_file_details(query):
-    result = await col.find_one({'_id': query})
-    if not result and MULTIPLE_DATABASE:
-        result = await sec_col.find_one({'_id': query})
-    return result
-
-def encode_file_id(s: bytes) -> str:
-    r = b""
-    n = 0
-    for i in s + bytes([22]) + bytes([4]):
-        if i == 0:
-            n += 1
-        else:
-            if n:
-                r += b"\x00" + bytes([n])
-                n = 0
-            r += bytes([i])
-    return base64.urlsafe_b64encode(r).decode().rstrip("=")
-
-def unpack_new_file_id(new_file_id):
-    """Return file_id string"""
-    decoded = FileId.decode(new_file_id)
-    file_id = encode_file_id(
-        pack(
-            "<iiqq",
-            int(decoded.file_type),
-            decoded.dc_id,
-            decoded.media_id,
-            decoded.access_hash
+    await query.answer('Processing...⏳', show_alert=True)
+    if int(from_user) not in ADMINS:
+        await bot.send_message(
+            int(from_user),
+            f'Your Submission for indexing {chat} has been accepted by our moderators and will be added soon.',
+            reply_to_message_id=int(lst_msg_id)
+        )
+    await msg.edit(
+        "Starting Indexing...",
+        reply_markup=InlineKeyboardMarkup(
+            [[InlineKeyboardButton('Cancel', callback_data='index_cancel')]]
         )
     )
-    return file_id
+    try:
+        chat = int(chat)
+    except:
+        chat = chat
+    await index_files_to_db(int(lst_msg_id), chat, msg, bot)
+
+
+@Client.on_message(filters.private & filters.command('index'))
+async def send_for_index(bot, message):
+    vj = await bot.ask(message.chat.id, "**Now Send Me Your Channel Last Post Link Or Forward A Last Message From Your Index Channel.\n\nAnd You Can Set Skip Number By - /setskip yourskipnumber**")
+    if vj.forward_from_chat and vj.forward_from_chat.type == enums.ChatType.CHANNEL:
+        last_msg_id = vj.forward_from_message_id
+        chat_id = vj.forward_from_chat.username or vj.forward_from_chat.id
+    elif vj.text:
+        regex = re.compile("(https://)?(t\.me/|telegram\.me/|telegram\.dog/)(c/)?(\d+|[a-zA-Z_0-9]+)/(\d+)$")
+        match = regex.match(vj.text)
+        if not match:
+            return await vj.reply('Invalid link\n\nTry again by /index')
+        chat_id = match.group(4)
+        last_msg_id = int(match.group(5))
+        if chat_id.isnumeric():
+            chat_id  = int(("-100" + chat_id))
+    else:
+        return await vj.reply('Invalid input.')
+
+    try:
+        await bot.get_chat(chat_id)
+    except ChannelInvalid:
+        return await vj.reply('This may be a private channel / group. Make me an admin over there to index the files.')
+    except (UsernameInvalid, UsernameNotModified):
+        return await vj.reply('Invalid Link specified.')
+    except Exception as e:
+        logger.exception(e)
+        return await vj.reply(f'Errors - {e}')
+
+    try:
+        k = await bot.get_messages(chat_id, last_msg_id)
+    except:
+        return await message.reply('Make Sure That I am an Admin in the Channel, if the channel is private')
+    if not k:
+        return await message.reply('This may be a group and I am not an admin of the group or the message ID is invalid.')
+
+    if message.from_user.id in ADMINS:
+        buttons = [[
+            InlineKeyboardButton('Yes', callback_data=f'index#accept#{chat_id}#{last_msg_id}#{message.from_user.id}')
+        ],[
+            InlineKeyboardButton('close', callback_data='close_data')
+        ]]
+        reply_markup = InlineKeyboardMarkup(buttons)
+        return await message.reply(
+            f'Do you Want To Index This Channel/ Group ?\n\nChat ID/ Username: <code>{chat_id}</code>\nLast Message ID: <code>{last_msg_id}</code>',
+            reply_markup=reply_markup
+        )
+
+    if type(chat_id) is int:
+        try:
+            link = (await bot.create_chat_invite_link(chat_id)).invite_link
+        except ChatAdminRequired:
+            return await message.reply('Make sure I am an admin in the chat and have permission to invite users.')
+    else:
+        link = f"https://t.me/{chat_id}"
+    buttons = [[
+        InlineKeyboardButton('Accept Index', callback_data=f'index#accept#{chat_id}#{last_msg_id}#{message.from_user.id}')
+    ],[
+        InlineKeyboardButton('Reject Index', callback_data=f'index#reject#{chat_id}#{message.id}#{message.from_user.id}'),
+    ]]
+    reply_markup = InlineKeyboardMarkup(buttons)
+    await bot.send_message(
+        LOG_CHANNEL,
+        f'#IndexRequest\n\nBy : {message.from_user.mention} (<code>{message.from_user.id}</code>)\nChat ID/ Username - <code> {chat_id}</code>\nLast Message ID - <code>{last_msg_id}</code>\nInviteLink - {link}',
+        reply_markup=reply_markup
+    )
+    await message.reply('Thank You For the Contribution, Wait For My Moderators to verify the files.')
+
+
+@Client.on_message(filters.command('setskip') & filters.user(ADMINS))
+async def set_skip_number(bot, message):
+    if ' ' in message.text:
+        _, skip = message.text.split(" ")
+        try:
+            skip = int(skip)
+        except:
+            return await message.reply("Skip number should be an integer.")
+        await message.reply(f"Successfully set SKIP number as {skip}")
+        temp.CURRENT = int(skip)
+    else:
+        await message.reply("Give me a skip number")
+
+
+async def index_files_to_db(lst_msg_id, chat, msg, bot):
+    total_files = 0
+    duplicate = 0
+    errors = 0
+    deleted = 0
+    no_media = 0
+    unsupported = 0
+    files_to_save = []
+    batch_size = 500  # Adjust batch size as needed
+
+    async with lock:
+        try:
+            current = temp.CURRENT
+            temp.CANCEL = False
+            async for message in bot.iter_messages(chat, lst_msg_id, temp.CURRENT):
+                if temp.CANCEL:
+                    await msg.edit("Successfully Cancelled!\n\nProcessing remaining files...")
+                    break
+                current += 1
+                if message.empty:
+                    deleted += 1
+                    continue
+                elif not message.media:
+                    no_media += 1
+                    continue
+                elif message.media not in [enums.MessageMediaType.VIDEO, enums.MessageMediaType.AUDIO, enums.MessageMediaType.DOCUMENT]:
+                    unsupported += 1
+                    continue
+                
+                media = getattr(message, message.media.value, None)
+                if not media:
+                    unsupported += 1
+                    continue
+
+                media.caption = message.caption
+                file_id = unpack_new_file_id(media.file_id)
+                
+                files_to_save.append({
+                    'file_id': file_id,
+                    'file_name': re.sub(r"(_|\-|\.|\+)", " ", str(getattr(media, 'file_name', ''))),
+                    'file_size': media.file_size,
+                    'file_type': message.media.value,
+                    'mime_type': getattr(media, 'mime_type', ''),
+                    'caption': media.caption.html if media.caption else None
+                })
+
+                if len(files_to_save) >= batch_size:
+                    inserted, dupes, errs = await save_files(files_to_save)
+                    total_files += inserted
+                    duplicate += dupes
+                    errors += errs
+                    files_to_save = [] # Reset batch
+
+                if current % 30 == 0:
+                    can = [[InlineKeyboardButton('Cancel', callback_data='index_cancel')]]
+                    reply = InlineKeyboardMarkup(can)
+                    try:
+                        await msg.edit_text(
+                            text=f"Total messages fetched: <code>{current}</code>\nTotal files saved: <code>{total_files}</code>\nDuplicate Files Skipped: <code>{duplicate}</code>\nDeleted Messages Skipped: <code>{deleted}</code>\nNon-Media messages skipped: <code>{no_media + unsupported}</code>\nErrors Occurred: <code>{errors}</code>",
+                            reply_markup=reply
+                        )
+                    except MessageNotModified:
+                        pass
+            
+            # Save any remaining files in the last batch
+            if files_to_save:
+                inserted, dupes, errs = await save_files(files_to_save)
+                total_files += inserted
+                duplicate += dupes
+                errors += errs
+
+        except Exception as e:
+            logger.exception(e)
+            await msg.edit(f'Error: {e}')
+        finally:
+            await msg.edit(f'Successfully saved <code>{total_files}</code> to database!\nDuplicate Files Skipped: <code>{duplicate}</code>\nDeleted Messages Skipped: <code>{deleted}</code>\nNon-Media messages skipped: <code>{no_media + unsupported}</code>\nErrors Occurred: <code>{errors}</code>')
