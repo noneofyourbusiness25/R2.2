@@ -37,21 +37,52 @@ async def ensure_indexes():
 import asyncio
 asyncio.ensure_future(ensure_indexes())
 
+async def save_file(media):
+    """Save a single file in the database (for channel posts)."""
+    file_id = unpack_new_file_id(media.file_id)
+    file_name = clean_file_name(media.file_name)
+
+    file = {
+        '_id': file_id,
+        'file_name': file_name,
+        'file_size': media.file_size,
+        'caption': media.caption.html if media.caption else None
+    }
+
+    try:
+        await col.insert_one(file)
+        print(f"{file_name} is successfully saved.")
+        return True, 1
+    except DuplicateKeyError:
+        print(f"{file_name} is already saved.")
+        return False, 0
+    except Exception as e:
+        if MULTIPLE_DATABASE:
+            try:
+                await sec_col.insert_one(file)
+                print(f"{file_name} is successfully saved.")
+                return True, 1
+            except DuplicateKeyError:
+                print(f"{file_name} is already saved.")
+                return False, 0
+            except Exception as e:
+                logger.error(f"Error saving to secondary DB: {e}")
+                return False, 2 # Error
+        else:
+            logger.error(f"Error saving file: {e}")
+            return False, 2 # Error
 
 async def save_files(files):
-    """Save multiple files in the database and report duplicates."""
+    """Save multiple files in the database (for batch indexing)."""
     duplicates = 0
     errors = 0
 
     documents_to_insert = []
     for file_info in files:
         doc = {
-            '_id': file_info['file_id'], # Use file_id as the unique _id
-            'file_ref': file_info.get('file_ref'), # Store file_ref separately
+            '_id': file_info['file_id'],
             'file_name': file_info['file_name'],
             'file_size': file_info['file_size'],
-            'file_type': file_info.get('file_type'),
-            'mime_type': file_info.get('mime_type'),
             'caption': file_info['caption']
         }
         documents_to_insert.append(doc)
@@ -65,7 +96,7 @@ async def save_files(files):
     except BulkWriteError as e:
         successful_inserts = e.details.get('nInserted', 0)
         for error in e.details.get('writeErrors', []):
-            if error.get('code') == 11000:  # Code for duplicate key error
+            if error.get('code') == 11000:
                 duplicates += 1
             else:
                 errors += 1
@@ -121,7 +152,7 @@ async def get_search_results(chat_id, query, file_type=None, max_results=10, off
     return files, next_offset, total_results
 
 async def get_bad_files(query, file_type=None, use_filter=False):
-    """Restored and corrected function to find files for deletion."""
+    """Restored function to find files for deletion."""
     query = query.strip()
     if not query:
         raw_pattern = '.'
@@ -137,12 +168,13 @@ async def get_bad_files(query, file_type=None, use_filter=False):
     if USE_CAPTION_FILTER:
         filter_criteria = {'$or': [filter_criteria, {'caption': regex}]}
 
-    total_results = await col.count_documents(filter_criteria)
     files = await col.find(filter_criteria).to_list(length=None)
+    total_results = len(files)
 
     if MULTIPLE_DATABASE:
-        total_results += await sec_col.count_documents(filter_criteria)
-        files.extend(await sec_col.find(filter_criteria).to_list(length=None))
+        secondary_files = await sec_col.find(filter_criteria).to_list(length=None)
+        files.extend(secondary_files)
+        total_results += len(secondary_files)
         
     return files, total_results
 
@@ -156,25 +188,14 @@ def encode_file_id(s: bytes) -> str:
     r = b""
     n = 0
     for i in s + bytes([22]) + bytes([4]):
-        if i == 0:
-            n += 1
+        if i == 0: n+= 1
         else:
-            if n:
-                r += b"\x00" + bytes([n])
-                n = 0
+            if n: r += b"\x00" + bytes([n]); n = 0
             r += bytes([i])
     return base64.urlsafe_b64encode(r).decode().rstrip("=")
 
 def unpack_new_file_id(new_file_id):
     """Return file_id string"""
     decoded = FileId.decode(new_file_id)
-    file_id = encode_file_id(
-        pack(
-            "<iiqq",
-            int(decoded.file_type),
-            decoded.dc_id,
-            decoded.media_id,
-            decoded.access_hash
-        )
-    )
+    file_id = encode_file_id(pack("<iiqq", int(decoded.file_type), decoded.dc_id, decoded.media_id, decoded.access_hash))
     return file_id
