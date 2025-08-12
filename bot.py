@@ -33,7 +33,7 @@ from TechVJ.bot.clients import initialize_clients
 
 ppath = "plugins/*.py"
 files = glob.glob(ppath)
-TechVJBot = TechVJBot()
+# TechVJBot = TechVJBot()  <- This is the line that has been removed.
 loop = asyncio.get_event_loop()
 
 async def periodic_save():
