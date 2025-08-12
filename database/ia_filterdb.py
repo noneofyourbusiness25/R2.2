@@ -73,12 +73,10 @@ async def save_files(files):
     except Exception as e:
         logger.error(f"General error saving batch: {e}")
         if MULTIPLE_DATABASE:
-            # Fallback to secondary DB
             try:
                 result = await sec_col.insert_many(documents_to_insert, ordered=False)
                 return len(result.inserted_ids), 0, 0
             except BulkWriteError as se:
-                # Handle errors for secondary DB as well
                 successful_inserts = se.details.get('nInserted', 0)
                 dupes = sum(1 for err in se.details.get('writeErrors', []) if err.get('code') == 11000)
                 errs = len(se.details.get('writeErrors', [])) - dupes
@@ -121,6 +119,32 @@ async def get_search_results(chat_id, query, file_type=None, max_results=10, off
         
     next_offset = offset + max_results if total_results > offset + max_results else ""
     return files, next_offset, total_results
+
+async def get_bad_files(query, file_type=None, use_filter=False):
+    """Restored and corrected function to find files for deletion."""
+    query = query.strip()
+    if not query:
+        raw_pattern = '.'
+    else:
+        raw_pattern = query.replace(' ', r'.*[\s\.\+\-_]')
+    
+    try:
+        regex = re.compile(raw_pattern, flags=re.IGNORECASE)
+        filter_criteria = {'file_name': regex}
+    except re.error:
+        filter_criteria = {'file_name': re.escape(query)}
+
+    if USE_CAPTION_FILTER:
+        filter_criteria = {'$or': [filter_criteria, {'caption': regex}]}
+
+    total_results = await col.count_documents(filter_criteria)
+    files = await col.find(filter_criteria).to_list(length=None)
+
+    if MULTIPLE_DATABASE:
+        total_results += await sec_col.count_documents(filter_criteria)
+        files.extend(await sec_col.find(filter_criteria).to_list(length=None))
+        
+    return files, total_results
 
 async def get_file_details(query):
     result = await col.find_one({'_id': query})
