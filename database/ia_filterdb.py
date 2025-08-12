@@ -240,7 +240,7 @@ async def get_bad_files(query, file_type=None, use_filter=False):
     return files, total_results
 
 async def get_file_details(query):
-    return col.find_one({'_id': query}) or sec_col.find_one({'_id': query})
+    return col.find_one({'file_id': query}) or sec_col.find_one({'file_id': query})
 
 def encode_file_id(s: bytes) -> str:
     r = b""
