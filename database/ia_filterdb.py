@@ -180,15 +180,10 @@ async def get_search_results(chat_id, query, file_type=None, max_results=10, off
         episode_str = f"{episode:02d}"
         raw_pattern += r'.*s' + season_str + r'.*e' + episode_str
 
-    if language:
+    if language and language != "english":
         lang_regex = get_language_regex(language)
         if lang_regex:
             raw_pattern += r'.*' + lang_regex
-            if language == "english":
-                # Also match files with no language
-                all_lang_tokens = [token for sublist in LANGUAGES.values() for token in sublist]
-                no_lang_regex = r'^(?!.*(' + '|'.join(all_lang_tokens) + r'))'
-                raw_pattern = f"({raw_pattern}|{no_lang_regex}.*)"
 
     try:
         regex = re.compile(raw_pattern, flags=re.IGNORECASE)
@@ -196,6 +191,22 @@ async def get_search_results(chat_id, query, file_type=None, max_results=10, off
         regex = re.escape(query)
 
     filter_criteria = {'$or': [{'file_name': regex}, {'caption': regex}]}
+
+    if language == "english":
+        all_other_lang_tokens = [token for lang, tokens in LANGUAGES.items() if lang != 'english' for token in tokens]
+        other_langs_regex = re.compile(r'\b(' + '|'.join(all_other_lang_tokens) + r')\b', re.IGNORECASE)
+
+        filter_criteria = {
+            '$and': [
+                filter_criteria,
+                {
+                    '$nor': [
+                        {'file_name': other_langs_regex},
+                        {'caption': other_langs_regex}
+                    ]
+                }
+            ]
+        }
 
     files = []
     fetched_primary = 0

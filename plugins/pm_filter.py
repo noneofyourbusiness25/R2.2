@@ -129,7 +129,7 @@ async def next_page(bot, query):
             InlineKeyboardButton("𝐒𝐞𝐧𝐝 𝐀𝐥𝐥", callback_data=f"sendfiles#{key}")
         ])
         btn.insert(1, [
-            InlineKeyboardButton("🔍 Filter results", callback_data=f"filter_results#{key}")
+            InlineKeyboardButton("🔍 Filter Results", callback_data=f"filter_results#{key}")
         ])
     else:
         btn = []
@@ -227,36 +227,58 @@ async def filter_results_cb_handler(client: Client, query: CallbackQuery):
     _, key = query.data.split("#")
 
     btn = [
-        [
-            InlineKeyboardButton("Movies", callback_data=f"movies#{key}"),
-            InlineKeyboardButton("Series", callback_data=f"series#{key}")
-        ],
-        [
-            InlineKeyboardButton("↭ Back to Home ↭", callback_data=f"next_0_{key}_0")
-        ]
+        [InlineKeyboardButton("🎬 Movies", callback_data=f"movies#{key}")],
+        [InlineKeyboardButton("📺 Series", callback_data=f"series#{key}")],
+        [InlineKeyboardButton("⬅️ Back to Home", callback_data=f"next_0_{key}_0")]
     ]
 
     await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(btn))
 
 @Client.on_callback_query(filters.regex(r"^movies#"))
 async def movies_cb_handler(client: Client, query: CallbackQuery):
-    _, key = query.data.split("#")
+    try:
+        _, key, page = query.data.split("#")
+        page = int(page)
+    except:
+        _, key = query.data.split("#")
+        page = 1
 
+    years_per_page = 20
     years = [str(y) for y in range(2025, 1899, -1)]
+
+    start_index = (page - 1) * years_per_page
+    end_index = start_index + years_per_page
+
+    page_years = years[start_index:end_index]
+
     btn = []
-    for i in range(0, len(years), 4):
+    for i in range(0, len(page_years), 4):
         row = []
         for j in range(4):
-            if i+j < len(years):
+            if i+j < len(page_years):
                 row.append(
                     InlineKeyboardButton(
-                        text=years[i+j],
-                        callback_data=f"year#{years[i+j]}#{key}"
+                        text=f"🗓️ {page_years[i+j]}",
+                        callback_data=f"year#{page_years[i+j]}#{key}"
                     )
                 )
         btn.append(row)
 
-    btn.append([InlineKeyboardButton("↭ Back ↭", callback_data=f"filter_results#{key}")])
+    # Pagination buttons
+    pagination_buttons = []
+    if page > 1:
+        pagination_buttons.append(
+            InlineKeyboardButton("« Back", callback_data=f"movies#{key}#{page-1}")
+        )
+    if end_index < len(years):
+        pagination_buttons.append(
+            InlineKeyboardButton("Next »", callback_data=f"movies#{key}#{page+1}")
+        )
+
+    if pagination_buttons:
+        btn.append(pagination_buttons)
+
+    btn.append([InlineKeyboardButton("⬅️ Back to Filter Type", callback_data=f"filter_results#{key}")])
 
     await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(btn))
 
@@ -276,13 +298,13 @@ async def year_select_cb_handler(client: Client, query: CallbackQuery):
             if i+j < len(languages):
                 row.append(
                     InlineKeyboardButton(
-                        text=languages[i+j].title(),
+                        text=f"🌐 {languages[i+j].title()}",
                         callback_data=f"lang#{languages[i+j]}#{key}"
                     )
                 )
         btn.append(row)
 
-    btn.append([InlineKeyboardButton("↭ Back ↭", callback_data=f"movies#{key}")])
+    btn.append([InlineKeyboardButton("⬅️ Back", callback_data=f"movies#{key}")])
 
     await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(btn))
 
@@ -304,7 +326,7 @@ async def series_cb_handler(client: Client, query: CallbackQuery):
                 )
         btn.append(row)
 
-    btn.append([InlineKeyboardButton("↭ Back ↭", callback_data=f"filter_results#{key}")])
+    btn.append([InlineKeyboardButton("⬅️ Back", callback_data=f"filter_results#{key}")])
 
     await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(btn))
 
@@ -316,27 +338,76 @@ async def season_select_cb_handler(client: Client, query: CallbackQuery):
     search = f"{search} s{int(season):02d}"
     FRESH[key] = search
 
+    episodes_per_page = 20
     episodes = [str(e) for e in range(1, 101)]
+
+    page_episodes = episodes[:episodes_per_page]
+
     btn = []
-    for i in range(0, len(episodes), 5):
+    for i in range(0, len(page_episodes), 5):
         row = []
         for j in range(5):
-            if i+j < len(episodes):
+            if i+j < len(page_episodes):
                 row.append(
                     InlineKeyboardButton(
-                        text=episodes[i+j],
-                        callback_data=f"episode#{episodes[i+j]}#{key}"
+                        text=f"🎞️ {page_episodes[i+j]}",
+                        callback_data=f"episode#{page_episodes[i+j]}#{key}"
                     )
                 )
         btn.append(row)
 
-    # a simple pagination for episodes
-    if len(episodes) > 40:
-        btn.append([InlineKeyboardButton("Next »", callback_data=f"episode_page#2#{key}")])
+    if len(episodes) > episodes_per_page:
+        btn.append([InlineKeyboardButton("Next »", callback_data=f"episodes_page#{key}#{season}#2")])
 
-    btn.append([InlineKeyboardButton("↭ Back ↭", callback_data=f"series#{key}")])
+    btn.append([InlineKeyboardButton("⬅️ Back to Seasons", callback_data=f"series#{key}")])
 
     await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(btn))
+
+
+@Client.on_callback_query(filters.regex(r"^episodes_page#"))
+async def episodes_page_cb_handler(client: Client, query: CallbackQuery):
+    _, key, season, page = query.data.split("#")
+    page = int(page)
+
+    episodes_per_page = 20
+    episodes = [str(e) for e in range(1, 101)]
+
+    start_index = (page - 1) * episodes_per_page
+    end_index = start_index + episodes_per_page
+
+    page_episodes = episodes[start_index:end_index]
+
+    btn = []
+    for i in range(0, len(page_episodes), 5):
+        row = []
+        for j in range(5):
+            if i+j < len(page_episodes):
+                row.append(
+                    InlineKeyboardButton(
+                        text=f"🎞️ {page_episodes[i+j]}",
+                        callback_data=f"episode#{page_episodes[i+j]}#{key}"
+                    )
+                )
+        btn.append(row)
+
+    # Pagination buttons
+    pagination_buttons = []
+    if page > 1:
+        pagination_buttons.append(
+            InlineKeyboardButton("« Back", callback_data=f"episodes_page#{key}#{season}#{page-1}")
+        )
+    if end_index < len(episodes):
+        pagination_buttons.append(
+            InlineKeyboardButton("Next »", callback_data=f"episodes_page#{key}#{season}#{page+1}")
+        )
+
+    if pagination_buttons:
+        btn.append(pagination_buttons)
+
+    btn.append([InlineKeyboardButton("⬅️ Back to Seasons", callback_data=f"series#{key}")])
+
+    await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(btn))
+
 
 @Client.on_callback_query(filters.regex(r"^episode#"))
 async def episode_select_cb_handler(client: Client, query: CallbackQuery):
@@ -354,13 +425,13 @@ async def episode_select_cb_handler(client: Client, query: CallbackQuery):
             if i+j < len(languages):
                 row.append(
                     InlineKeyboardButton(
-                        text=languages[i+j].title(),
+                        text=f"🌐 {languages[i+j].title()}",
                         callback_data=f"lang#{languages[i+j]}#{key}"
                     )
                 )
         btn.append(row)
 
-    btn.append([InlineKeyboardButton("↭ Back ↭", callback_data=f"season#1#{key}")]) # a bit of a hack here, we don't know the season number
+    btn.append([InlineKeyboardButton("⬅️ Back", callback_data=f"season#1#{key}")]) # a bit of a hack here, we don't know the season number
 
     await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(btn))
 
@@ -412,7 +483,7 @@ async def auto_filter(client, msg, message, reply_msg, ai_search, spoll=None):
         InlineKeyboardButton("𝐒𝐞𝐧𝐝 𝐀𝐥𝐥", callback_data=f"sendfiles#{key}")
     ])
     btn.insert(1, [
-        InlineKeyboardButton("🔍 Filter results", callback_data=f"filter_results#{key}")
+        InlineKeyboardButton("🔍 Filter Results", callback_data=f"filter_results#{key}")
     ])
 
     if offset != 0:
