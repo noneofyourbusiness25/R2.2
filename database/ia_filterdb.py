@@ -136,57 +136,44 @@ def normalize_and_generate_regex(query_text):
     query_text = ' '.join([word for word in query_text.split() if word.lower() not in STOP_WORDS])
 
     # --- Parse Season/Episode ---
-    season = None
-    episode = None
-    season_match = re.search(r'\b(s|season)\s?(\d{1,2})\b', query_text, re.IGNORECASE)
-    if season_match:
-        season = int(season_match.group(2))
-        query_text = query_text.replace(season_match.group(0), '')
-
-    episode_match = re.search(r'\b(e|ep|episode)\s?(\d{1,3})\b', query_text, re.IGNORECASE)
-    if episode_match:
-        episode = int(episode_match.group(2))
-        query_text = query_text.replace(episode_match.group(0), '')
+    se_pattern = None
+    se_match = re.search(r'\b(s|season)\s?(\d{1,2})[\s\._-]*(e|ep|episode)\s?(\d{1,3})\b', query_text, re.IGNORECASE)
+    if se_match:
+        season = int(se_match.group(2))
+        episode = int(se_match.group(4))
+        # Create a flexible regex for SXXEXX format
+        s_str, s0_str = f"{season:01d}", f"{season:02d}"
+        e_str, e0_str = f"{episode:01d}", f"{episode:02d}"
+        # This handles S01E02, S01.E02, S01 EP 02, S01EP02 etc.
+        se_pattern = f"S(0?{s_str}|{s0_str})[\\s\\._-]*?(E|EP)?[\\s\\._-]*?(0?{e_str}|{e0_str})"
+        query_text = query_text.replace(se_match.group(0), '', 1)
 
     # --- Parse Year ---
-    year = None
+    year_pattern = None
     year_match = re.search(r'\b(19|20)\d{2}\b', query_text)
     if year_match:
-        year = year_match.group(0)
-        query_text = query_text.replace(year_match.group(0), '')
+        year_pattern = year_match.group(0)
+        query_text = query_text.replace(year_match.group(0), '', 1)
 
     # --- The rest is the title ---
-    title = query_text.strip()
+    # The remaining parts of the query are treated as title keywords
+    title_parts = query_text.strip().split()
 
-    # --- Build Regex ---
-    regex_parts = []
-    if title:
-        title_parts = title.split(' ')
-        regex_parts.append(''.join([f'(?=.*{re.escape(part)})' for part in title_parts]))
+    # --- Build a simple, ordered regex ---
+    # This is much faster than lookaheads.
+    all_parts = [re.escape(part) for part in title_parts if part]
+    if year_pattern:
+        all_parts.append(year_pattern)
+    if se_pattern:
+        all_parts.append(se_pattern)
 
-    if year:
-        regex_parts.append(f'(?=.*{year})')
+    # Join all parts with '.*' to find them in order, separated by anything.
+    final_regex = '.*'.join(all_parts)
 
-    if season is not None and episode is not None:
-        s_str = f"{season:01d}"
-        s0_str = f"{season:02d}"
-        e_str = f"{episode:01d}"
-        e0_str = f"{episode:02d}"
-
-        se_regex = f"S(0?{s_str}|{s0_str})[\\s\\._-]*E(P|p)?(0?{e_str}|{e0_str})"
-        regex_parts.append(f'(?=.*{se_regex})')
-    elif season is not None:
-        s_str = f"{season:01d}"
-        s0_str = f"{season:02d}"
-        s_regex = f"S(0?{s_str}|{s0_str})"
-        regex_parts.append(f'(?=.*{s_regex})')
-
-    final_regex = ''.join(regex_parts)
-
-    return final_regex if final_regex else ".*" # Return ".*" if no parts were found
+    return final_regex if final_regex else ".*"
 
 async def get_search_results(chat_id, query, file_type=None, max_results=10, offset=0, filter=False):
-    """For given query return (results, next_offset)"""
+    """For given query return (results, next_offset, total_results)"""
 
     start_time = time.monotonic()
 
@@ -199,15 +186,16 @@ async def get_search_results(chat_id, query, file_type=None, max_results=10, off
 
     filter_criteria = {'$or': [{'file_name': regex}, {'caption': regex}]}
 
-    # Extract language from query for filtering, but don't use it for the main search pattern
+    # Extract language from query for filtering
     language = None
-    parts = query.split()
-    for part in parts:
-        if part.lower() in [lang for sublist in LANGUAGES.values() for lang in sublist]:
-            for lang, tokens in LANGUAGES.items():
-                if part.lower() in tokens:
-                    language = lang
-                    break
+    query_parts = query.lower().split()
+    for part in query_parts:
+        for lang, tokens in LANGUAGES.items():
+            if part in tokens:
+                language = lang
+                break
+        if language:
+            break
 
     if language and language != "english":
         lang_regex = re.compile(get_language_regex(language), re.IGNORECASE)
@@ -233,6 +221,16 @@ async def get_search_results(chat_id, query, file_type=None, max_results=10, off
             ]
         }
 
+    # Get total count for pagination
+    total_results = 0
+    try:
+        total_results += col.count_documents(filter_criteria)
+        if MULTIPLE_DATABASE:
+            total_results += sec_col.count_documents(filter_criteria)
+    except Exception as e:
+        logger.exception(f"Count documents failed | query='{query}' | pattern='{raw_pattern}'")
+
+    # Fetch paginated results
     files = []
     fetched_primary = 0
     fetched_secondary = 0
@@ -245,13 +243,18 @@ async def get_search_results(chat_id, query, file_type=None, max_results=10, off
                 fetched_primary += 1
         except Exception as e:
             logger.exception(f"Primary DB find failed | query='{query}' | pattern='{raw_pattern}'")
-        try:
-            cursor2 = sec_col.find(filter_criteria).sort('$natural', -1).skip(offset).limit(max_results)
-            for file in cursor2:
-                files.append(file)
-                fetched_secondary += 1
-        except Exception as e:
-            logger.exception(f"Secondary DB find failed | query='{query}' | pattern='{raw_pattern}'")
+
+        # Adjust offset and limit for the second database if needed
+        remaining_limit = max_results - fetched_primary
+        if remaining_limit > 0:
+            secondary_offset = max(0, offset - total_results) # A simple way to handle offset across DBs
+            try:
+                cursor2 = sec_col.find(filter_criteria).sort('$natural', -1).skip(secondary_offset).limit(remaining_limit)
+                for file in cursor2:
+                    files.append(file)
+                    fetched_secondary += 1
+            except Exception as e:
+                logger.exception(f"Secondary DB find failed | query='{query}' | pattern='{raw_pattern}'")
     else:
         try:
             cursor = col.find(filter_criteria).sort('$natural', -1).skip(offset).limit(max_results)
@@ -261,8 +264,8 @@ async def get_search_results(chat_id, query, file_type=None, max_results=10, off
         except Exception:
             logger.exception(f"Primary DB find failed (single DB mode) | query='{query}' | pattern='{raw_pattern}'")
 
-    total_results = len(files)
-    next_offset = "" if len(files) < max_results else (offset + max_results)
+    current_fetched = len(files)
+    next_offset = offset + current_fetched if total_results > offset + current_fetched else ""
 
     duration_ms = int((time.monotonic() - start_time) * 1000)
     logger.info(
