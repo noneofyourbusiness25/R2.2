@@ -120,7 +120,7 @@ LANGUAGES = {
     "english": ["english", "eng"],
     "tamil": ["tamil", "tam"],
     "telugu": ["telugu", "tel"],
-    "malayalam": ["malayalam", "mala"],
+    "malayalam": ["malayalam", "mala", "mal"],
     "japanese": ["japanese", "jap"],
     "korean": ["korean", "ko"],
 }
