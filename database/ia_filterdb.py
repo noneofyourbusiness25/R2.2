@@ -12,7 +12,7 @@ from info import FILE_DB_URI, SEC_FILE_DB_URI, DATABASE_NAME, COLLECTION_NAME, M
 
 logger = logging.getLogger(__name__)
 
-# First Database For File Saving 
+# First Database For File Saving
 client = MongoClient(FILE_DB_URI)
 db = client[DATABASE_NAME]
 col = db[COLLECTION_NAME]
@@ -25,10 +25,10 @@ sec_col = sec_db[COLLECTION_NAME]
 
 async def save_file(media):
     """Save file in the database."""
-    
+
     file_id, file_ref = unpack_new_file_id(media.file_id)
     file_name = clean_file_name(media.file_name)
-    
+
     file = {
         '_id': file_id,
         'file_ref': file_ref,
@@ -36,7 +36,7 @@ async def save_file(media):
         'file_size': media.file_size,
         'file_type': media.file_type,
         'mime_type': media.mime_type,
-        'caption': media.caption.html if media.caption else None,
+        'caption': clean_file_name(media.caption.html) if media.caption else None,
         'file_id': file_id
     }
 
@@ -94,12 +94,14 @@ async def save_files(files):
 
 def clean_file_name(file_name):
     """Clean and format the file name."""
-    file_name = re.sub(r"(_|\-|\.|\+)", " ", str(file_name)) 
+    if not file_name:
+        return ""
+    file_name = re.sub(r"(_|\-|\.|\+)", " ", str(file_name))
     unwanted_chars = ['[', ']', '(', ')', '{', '}']
-    
+
     for char in unwanted_chars:
         file_name = file_name.replace(char, '')
-        
+
     return ' '.join(filter(lambda x: not x.startswith('@') and not x.startswith('http') and not x.startswith('www.') and not x.startswith('t.me'), file_name.split()))
 
 def is_file_already_saved(file_id, file_name):
@@ -110,114 +112,148 @@ def is_file_already_saved(file_id, file_name):
         if collection.find_one(found):
             print(f"{file_name} is already saved.")
             return True
-            
+
     return False
+
+LANGUAGES = {
+    "hindi": ["hindi", "hin"],
+    "english": ["english", "eng"],
+    "tamil": ["tamil", "tam"],
+    "telugu": ["telugu", "tel"],
+    "malayalam": ["malayalam", "mala"],
+    "japanese": ["japanese", "jap"],
+    "korean": ["korean", "ko"],
+}
+
+def get_language_regex(language):
+    if language not in LANGUAGES:
+        return None
+
+    tokens = LANGUAGES[language]
+    return r'\b(' + '|'.join(tokens) + r')\b'
 
 async def get_search_results(chat_id, query, file_type=None, max_results=10, offset=0, filter=False):
     """For given query return (results, next_offset)"""
-    
+
     start_time = time.monotonic()
-    logger.info(f"get_search_results called | chat_id={chat_id} | query='{query}' | file_type={file_type} | max_results={max_results} | offset={offset} | MULTIPLE_DATABASE={MULTIPLE_DATABASE}")
 
     query = query.strip()
-    if not query:
+
+    # Parse query
+    name = ""
+    year = None
+    season = None
+    episode = None
+    language = None
+
+    parts = query.split()
+    for part in parts:
+        if part.isdigit() and len(part) == 4:
+            year = part
+        elif part.lower() in [lang for sublist in LANGUAGES.values() for lang in sublist]:
+            for lang, tokens in LANGUAGES.items():
+                if part.lower() in tokens:
+                    language = lang
+                    break
+        elif re.match(r"s(\d{1,2})e(\d{1,3})", part.lower()):
+            match = re.match(r"s(\d{1,2})e(\d{1,3})", part.lower())
+            season = int(match.group(1))
+            episode = int(match.group(2))
+        else:
+            name += part + " "
+
+    name = name.strip()
+
+    # Build regex
+    if not name:
         raw_pattern = '.'
-    elif ' ' not in query:
-        raw_pattern = r'(\b|[\.\+\-_])' + query + r'(\b|[\.\+\-_])'
+    elif ' ' not in name:
+        raw_pattern = r'(\b|[\.\+\-_])' + re.escape(name) + r'(\b|[\.\+\-_])'
     else:
-        raw_pattern = query.replace(' ', r'.*[\s\.\+\-_]') 
+        raw_pattern = re.escape(name).replace(' ', r'.*[\s\.\+\-_]')
+
+    if year:
+        raw_pattern += r'.*' + re.escape(year)
+
+    if season and episode:
+        season_str = f"{season:02d}"
+        episode_str = f"{episode:02d}"
+        raw_pattern += r'.*s' + season_str + r'.*e' + episode_str
+
+    if language:
+        lang_regex = get_language_regex(language)
+        if lang_regex:
+            raw_pattern += r'.*' + lang_regex
+            if language == "english":
+                # Also match files with no language
+                all_lang_tokens = [token for sublist in LANGUAGES.values() for token in sublist]
+                no_lang_regex = r'^(?!.*(' + '|'.join(all_lang_tokens) + r'))'
+                raw_pattern = f"({raw_pattern}|{no_lang_regex}.*)"
+
     try:
         regex = re.compile(raw_pattern, flags=re.IGNORECASE)
     except re.error:
-        logger.exception(f"Regex compilation failed for raw_pattern='{raw_pattern}' built from query='{query}'. Falling back to plain string search.")
-        regex = query
-    filter = {'file_name': regex}
+        regex = re.escape(query)
+
+    filter_criteria = {'$or': [{'file_name': regex}, {'caption': regex}]}
+
     files = []
     fetched_primary = 0
     fetched_secondary = 0
-    primary_count = 0
-    secondary_count = 0
-    error_primary = None
-    error_secondary = None
+
     if MULTIPLE_DATABASE:
         try:
-            cursor1 = col.find(filter).sort('$natural', -1).skip(offset).limit(max_results)
+            cursor1 = col.find(filter_criteria).sort('$natural', -1).skip(offset).limit(max_results)
             for file in cursor1:
                 files.append(file)
                 fetched_primary += 1
         except Exception as e:
-            error_primary = str(e)
-            logger.exception(f"Primary DB find failed | query='{query}' | pattern='{raw_pattern}' | offset={offset} | limit={max_results}")
+            logger.exception(f"Primary DB find failed | query='{query}' | pattern='{raw_pattern}'")
         try:
-            cursor2 = sec_col.find(filter).sort('$natural', -1).skip(offset).limit(max_results)
+            cursor2 = sec_col.find(filter_criteria).sort('$natural', -1).skip(offset).limit(max_results)
             for file in cursor2:
                 files.append(file)
                 fetched_secondary += 1
         except Exception as e:
-            error_secondary = str(e)
-            logger.exception(f"Secondary DB find failed | query='{query}' | pattern='{raw_pattern}' | offset={offset} | limit={max_results}")
+            logger.exception(f"Secondary DB find failed | query='{query}' | pattern='{raw_pattern}'")
     else:
         try:
-            cursor = col.find(filter).sort('$natural', -1).skip(offset).limit(max_results)
+            cursor = col.find(filter_criteria).sort('$natural', -1).skip(offset).limit(max_results)
             for file in cursor:
                 files.append(file)
                 fetched_primary += 1
         except Exception:
-            error_primary = "primary-only-find-failed"
-            logger.exception(f"Primary DB find failed (single DB mode) | query='{query}' | pattern='{raw_pattern}' | offset={offset} | limit={max_results}")
+            logger.exception(f"Primary DB find failed (single DB mode) | query='{query}' | pattern='{raw_pattern}'")
 
-    try:
-        primary_count = col.count_documents(filter)
-    except Exception:
-        primary_count = -1
-        logger.exception(f"Primary DB count_documents failed | query='{query}' | pattern='{raw_pattern}'")
-    if MULTIPLE_DATABASE:
-        try:
-            secondary_count = sec_col.count_documents(filter)
-        except Exception:
-            secondary_count = -1
-            logger.exception(f"Secondary DB count_documents failed | query='{query}' | pattern='{raw_pattern}'")
-    total_results = primary_count if not MULTIPLE_DATABASE else (max(0, primary_count) + max(0, secondary_count))
-    next_offset = "" if (offset + max_results) >= total_results else (offset + max_results)
+    total_results = len(files)
+    next_offset = "" if len(files) < max_results else (offset + max_results)
 
     duration_ms = int((time.monotonic() - start_time) * 1000)
     logger.info(
-        "get_search_results stats | query='%s' | pattern='%s' | total=%s | next_offset=%s | fetched_primary=%s | fetched_secondary=%s | primary_count=%s | secondary_count=%s | errors: primary=%s secondary=%s | duration_ms=%s",
+        "get_search_results stats | query='%s' | pattern='%s' | total=%s | next_offset=%s | fetched_primary=%s | fetched_secondary=%s | duration_ms=%s",
         query,
         raw_pattern,
         total_results,
         next_offset,
         fetched_primary,
         fetched_secondary,
-        primary_count,
-        secondary_count,
-        error_primary,
-        error_secondary,
         duration_ms,
     )
-    if total_results == 0:
-        logger.error(
-            "ZERO RESULTS | chat_id=%s | query='%s' | pattern='%s' | offset=%s | limit=%s | MULTIPLE_DATABASE=%s",
-            chat_id,
-            query,
-            raw_pattern,
-            offset,
-            max_results,
-            MULTIPLE_DATABASE,
-        )
+
     return files, next_offset, total_results
+
 
 async def get_bad_files(query, file_type=None, use_filter=False):
     """For given query return (results, next_offset)"""
     query = query.strip()
-    
+
     if not query:
         raw_pattern = '.'
     elif ' ' not in query:
         raw_pattern = rf'(\b|[.+-_]){query}(\b|[.+-_])'
     else:
         raw_pattern = query.replace(' ', r'.*[s.+-_]')
-    
+
     try:
         regex = re.compile(raw_pattern, flags=re.IGNORECASE)
     except re.error:
@@ -254,7 +290,7 @@ def encode_file_id(s: bytes) -> str:
                 n = 0
             r += bytes([i])
     return base64.urlsafe_b64encode(r).decode().rstrip("=")
-    
+
 def unpack_new_file_id(new_file_id):
     """Return file_id, file_ref"""
     decoded = FileId.decode(new_file_id)
