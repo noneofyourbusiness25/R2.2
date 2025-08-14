@@ -380,6 +380,199 @@ async def lang_select_cb_handler(client: Client, query: CallbackQuery):
     # a bit of a hack to reuse the existing display logic
     await auto_filter(client, search, query.message.reply_to_message, query.message, True, spoll=(search, files, offset, total_results))
 
+async def auto_filter(client, msg, message, reply_msg, ai_search, spoll=None):
+    if spoll:
+        search, files, offset, total_results = spoll
+    else:
+        search = msg
+        files, offset, total_results = await get_search_results(message.chat.id, search, offset=0, filter=True)
+
+    if not files:
+        return
+
+    key = f"{message.chat.id}-{message.id}"
+    FRESH[key] = search
+
+    settings = await get_settings(message.chat.id)
+    if settings["button"]:
+        btn = [
+            [
+                InlineKeyboardButton(
+                    text=f"[{get_size(file['file_size'])}] {' '.join(filter(lambda x: not x.startswith('[') and not x.startswith('@') and not x.startswith('www.'), file['file_name'].split()))}",
+                    callback_data=f'file#{file["file_id"]}'
+                ),
+            ]
+            for file in files
+        ]
+    else:
+        btn = []
+
+    btn.insert(0, [
+        InlineKeyboardButton("𝐒𝐞𝐧𝐝 𝐀𝐥𝐥", callback_data=f"sendfiles#{key}")
+    ])
+    btn.insert(1, [
+        InlineKeyboardButton("🔍 Filter results", callback_data=f"filter_results#{key}")
+    ])
+
+    if offset != 0:
+        btn.append(
+            [InlineKeyboardButton("𝐏𝐀𝐆𝐄", callback_data="pages"), InlineKeyboardButton(f"1/{math.ceil(total_results/10)}", callback_data="pages"), InlineKeyboardButton("𝐍𝐄𝐗𝐓 ➪", callback_data=f"next_0_{key}_{offset}")]
+        )
+
+    if AUTO_FILTER_REPLY_MSG:
+        if search.upper() in str(files):
+            if settings["imdb"]:
+                imdb = await get_poster(search)
+                if imdb:
+                    caption = script.IMDB_TEMPLATE.format(
+                        title=imdb['title'],
+                        votes=imdb['votes'],
+                        aka=imdb['aka'],
+                        seasons=imdb['seasons'],
+                        box_office=imdb['box_office'],
+                        localized_title=imdb['localized_title'],
+                        kind=imdb['kind'],
+                        imdb_id=imdb["imdb_id"],
+                        cast=imdb["cast"],
+                        runtime=imdb["runtime"],
+                        countries=imdb["countries"],
+                        certificates=imdb["certificates"],
+                        languages=imdb["languages"],
+                        director=imdb["director"],
+                        writer=imdb["writer"],
+                        producer=imdb["producer"],
+                        composer=imdb["composer"],
+                        cinematographer=imdb["cinematographer"],
+                        music_team=imdb["music_team"],
+                        distributors=imdb["distributors"],
+                        release_date=imdb['release_date'],
+                        year=imdb['year'],
+                        genres=imdb['genres'],
+                        poster=imdb['poster'],
+                        plot=imdb['plot'],
+                        query=search
+                    )
+                else:
+                    caption = f"<b>Tɪᴛʟᴇ: {search.upper()}\n\nRᴇǫᴜᴇsᴛᴇד Bʏ: {message.from_user.mention}\n\nTᴏᴛᴀʟ Fɪʟᴇs: {total_results}\n\nEɴᴊᴏʏ Yᴏᴜʀ Mᴏᴠɪᴇ ✨</b>"
+            else:
+                caption = f"<b>Tɪᴛʟᴇ: {search.upper()}\n\nRᴇǫᴜᴇsᴛᴇᴅ Bʏ: {message.from_user.mention}\n\nTᴏᴛᴀʟ Fɪʟᴇs: {total_results}\n\nEɴᴊᴏʏ Yᴏᴜʀ Mᴏᴠɪᴇ ✨</b>"
+
+            if imdb and imdb.get('poster'):
+                try:
+                    await reply_msg.delete()
+                    await message.reply_photo(photo=imdb.get('poster'), caption=caption, reply_markup=InlineKeyboardMarkup(btn))
+                    return
+                except (MediaEmpty, PhotoInvalidDimensions, WebpageMediaEmpty):
+                    await message.reply_text(caption, reply_markup=InlineKeyboardMarkup(btn))
+                    return
+            else:
+                await reply_msg.edit_text(caption, reply_markup=InlineKeyboardMarkup(btn))
+                return
+    else:
+        await reply_msg.delete()
+        m = await message.reply_text(f"<b>Tɪᴛʟᴇ: {search.upper()}\n\nRᴇǫᴜᴇsᴛᴇᴅ Bʏ: {message.from_user.mention}\n\nTᴏᴛᴀʟ Fɪʟᴇs: {total_results}\n\nEɴᴊᴏʏ Yᴏᴜʀ Mᴏᴠɪᴇ ✨</b>", reply_markup=InlineKeyboardMarkup(btn))
+        if settings['auto_delete']:
+            await asyncio.sleep(AUTO_DELETE_TIME)
+            await m.delete()
+
+async def manual_filters(client, message, text=False):
+    group_id = message.chat.id
+    name = text or message.text
+    reply_id = message.reply_to_message.id if message.reply_to_message else message.id
+    keywords = await get_filters(group_id)
+    for keyword in reversed(sorted(keywords, key=len)):
+        pattern = r"( |^|[^\w])" + re.escape(keyword) + r"( |$|[^\w])"
+        if re.search(pattern, name, re.IGNORECASE):
+            reply_text, btn, alert, fileid = await find_filter(group_id, keyword)
+
+            if reply_text:
+                reply_text = reply_text.replace
+
+            if btn is not None:
+                btn = eval(btn)
+
+            if fileid == "None":
+                if btn is not None:
+                    await client.send_message(
+                        group_id,
+                        reply_text,
+                        reply_markup=InlineKeyboardMarkup(btn),
+                        reply_to_message_id=reply_id
+                    )
+                else:
+                    await client.send_message(
+                        group_id,
+                        reply_text,
+                        reply_to_message_id=reply_id
+                    )
+            else:
+                if btn is not None:
+                    await client.send_cached_media(
+                        group_id,
+                        fileid,
+                        caption=reply_text,
+                        reply_markup=InlineKeyboardMarkup(btn),
+                        reply_to_message_id=reply_id
+                    )
+                else:
+                    await client.send_cached_media(
+                        group_id,
+                        fileid,
+                        caption=reply_text,
+                        reply_to_message_id=reply_id
+                    )
+            return True
+    return False
+
+async def global_filters(client, message, text=False):
+    group_id = message.chat.id
+    name = text or message.text
+    reply_id = message.reply_to_message.id if message.reply_to_message else message.id
+    keywords = await get_gfilters('gfilters')
+    for keyword in reversed(sorted(keywords, key=len)):
+        pattern = r"( |^|[^\w])" + re.escape(keyword) + r"( |$|[^\w])"
+        if re.search(pattern, name, re.IGNORECASE):
+            reply_text, btn, alert, fileid = await find_gfilter('gfilters', keyword)
+
+            if reply_text:
+                reply_text = reply_text.replace
+
+            if btn is not None:
+                btn = eval(btn)
+
+            if fileid == "None":
+                if btn is not None:
+                    await client.send_message(
+                        group_id,
+                        reply_text,
+                        reply_markup=InlineKeyboardMarkup(btn),
+                        reply_to_message_id=reply_id
+                    )
+                else:
+                    await client.send_message(
+                        group_id,
+                        reply_text,
+                        reply_to_message_id=reply_id
+                    )
+            else:
+                if btn is not None:
+                    await client.send_cached_media(
+                        group_id,
+                        fileid,
+                        caption=reply_text,
+                        reply_markup=InlineKeyboardMarkup(btn),
+                        reply_to_message_id=reply_id
+                    )
+                else:
+                    await client.send_cached_media(
+                        group_id,
+                        fileid,
+                        caption=reply_text,
+                        reply_to_message_id=reply_id
+                    )
+            return True
+    return False
+
 @Client.on_callback_query(filters.regex(r"^spol"))
 async def advantage_spoll_choker(bot, query):
     _, user, movie_ = query.data.split('#')
@@ -1092,7 +1285,7 @@ async def cb_handler(client: Client, query: CallbackQuery):
             except UserIsBlocked:
                 await client.send_message(chat_id=int(SUPPORT_CHAT_ID), text=f"<b>Hᴇʏ {user.mention}, Yᴏᴜʀ ʀᴇᴏ̨ᴜᴇsᴛ ɪs ᴀʟʀᴇᴀᴅʏ ᴀᴠᴀɪʟᴀʙʟᴇ ᴏɴ ᴏᴜʀ ʙᴏᴛ's ᴅᴀᴛᴀʙᴀsᴇ. Kɪɴᴅʟʏ sᴇᴀʀᴄʜ ɪɴ ᴏᴜʀ Gʀᴏᴜᴘ.\n\nNᴏᴛᴇ: Tʜɪs ᴍᴇssᴀɢᴇ ɪs sᴇɴᴛ ᴛᴏ ᴛʜɪs ɢʀᴏᴜᴘ ʙᴇᴄᴀᴜsᴇ ʏᴏᴜ'ᴠᴇ ʙʟᴏᴄᴋᴇᴅ ᴛʜᴇ ʙᴏᴛ. Tᴏ sᴇɴᴅ ᴛʜɪs ᴍᴇssᴀɢᴇ ᴛᴏ ʏᴏᴜʀ PM, Mᴜsᴛ ᴜɴʙʟᴏᴄᴋ ᴛʜᴇ ʙᴏᴛ.</b>", reply_markup=InlineKeyboardMarkup(btn2))
         else:
-            await query.answer("Yᴏᴜ ᴅᴏɴ'ᴛ ʜᴀᴠᴇ sᴜғғɪᴄɪᴀɴᴛ ʀɪɢᴛs ᴛᴏ ᴅᴏ ᴛʜɪs !", show_alert=True)
+            await query.answer("Yᴏᴜ ᴅᴏɴ'ᴛ ʜᴀᴠᴇ sᴜғғɪᴄɪᴀɴᴛ ʀɪɢʜᴛs ᴛᴏ ᴅᴏ ᴛʜɪs !", show_alert=True)
 
     elif query.data.startswith("alalert"):
         ident, from_user = query.data.split("#")
