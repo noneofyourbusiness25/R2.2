@@ -192,17 +192,21 @@ async def get_search_results(chat_id, query, file_type=None, max_results=10, off
 
         filter_criteria = {'$or': [filter_e, filter_ep]}
     else:
-        if language and language != "english":
-            lang_regex = get_language_regex(language)
-            if lang_regex:
-                raw_pattern += r'.*' + lang_regex
         try:
             regex = re.compile(raw_pattern, flags=re.IGNORECASE)
         except re.error:
             regex = re.escape(query)
         filter_criteria = {'$or': [{'file_name': regex}, {'caption': regex}]}
 
-    if language == "english":
+    if language and language != "english":
+        lang_regex = re.compile(get_language_regex(language), re.IGNORECASE)
+        filter_criteria = {
+            '$and': [
+                filter_criteria,
+                {'$or': [{'file_name': lang_regex}, {'caption': lang_regex}]}
+            ]
+        }
+    elif language == "english":
         all_other_lang_tokens = [token for lang, tokens in LANGUAGES.items() if lang != 'english' for token in tokens]
         other_langs_regex = re.compile(r'\b(' + '|'.join(all_other_lang_tokens) + r')\b', re.IGNORECASE)
 
