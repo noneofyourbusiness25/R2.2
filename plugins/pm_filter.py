@@ -28,7 +28,6 @@ BUTTONS = {}
 BUTTONS0 = {}
 BUTTONS1 = {}
 BUTTONS2 = {}
-SPELL_CHECK = {}
 
 @Client.on_message(filters.group & filters.text & filters.incoming)
 async def give_filter(client, message):
@@ -447,6 +446,28 @@ async def lang_select_cb_handler(client: Client, query: CallbackQuery):
     # a bit of a hack to reuse the existing display logic
     await auto_filter(client, search, query.message.reply_to_message, query.message, True, spoll=(search, files, offset, total_results))
 
+async def spell_check_helper(client, message, reply_msg):
+    query = message.text
+    suggestions = await search_gagala(query)
+    if not suggestions:
+        return await reply_msg.edit("🤷‍♂️ No results found 🤷‍♂️")
+
+    btn = [
+        [
+            InlineKeyboardButton(
+                text=s.title(),
+                callback_data=f"spol#{message.from_user.id}#{base64.urlsafe_b64encode(s.encode()).decode()}"
+            )
+        ]
+        for s in suggestions[:5]
+    ]
+    btn.append([InlineKeyboardButton("Close", callback_data=f"spol#{message.from_user.id}#close_spellcheck")])
+
+    await reply_msg.edit(
+        text="I couldn't find anything for that. Did you mean one of these?",
+        reply_markup=InlineKeyboardMarkup(btn)
+    )
+
 async def auto_filter(client, msg, message, reply_msg, ai_search, spoll=None):
     imdb = None
     if spoll:
@@ -456,7 +477,10 @@ async def auto_filter(client, msg, message, reply_msg, ai_search, spoll=None):
         files, offset, total_results = await get_search_results(message.chat.id, search, offset=0, filter=True)
 
     if not files:
-        return
+        if SPELL_CHECK_REPLY:
+            return await spell_check_helper(client, message, reply_msg)
+        else:
+            return await reply_msg.edit("🤷‍♂️ No results found 🤷‍♂️")
 
     settings = await get_settings(message.chat.id)
     encoded_search = base64.urlsafe_b64encode(search.encode()).decode()
@@ -641,15 +665,13 @@ async def global_filters(client, message, text=False):
 
 @Client.on_callback_query(filters.regex(r"^spol"))
 async def advantage_spoll_choker(bot, query):
-    _, user, movie_ = query.data.split('#')
-    movies = SPELL_CHECK.get(query.message.reply_to_message.id)
-  #  if not movies:
-     #   return await query.answer(script.OLD_ALRT_TXT.format(query.from_user.first_name), show_alert=True)
+    _, user, encoded_suggestion = query.data.split('#')
     if int(user) != 0 and query.from_user.id != int(user):
         return await query.answer(script.ALRT_TXT.format(query.from_user.first_name), show_alert=True)
-    if movie_ == "close_spellcheck":
+    if encoded_suggestion == "close_spellcheck":
         return await query.message.delete()
-    movie = movies[(int(movie_))]
+
+    movie = base64.urlsafe_b64decode(encoded_suggestion).decode()
     movie = re.sub(r"[:\-]", " ", movie)
     movie = re.sub(r"\s+", " ", movie).strip()
     await query.answer(script.TOP_ALRT_MSG)
