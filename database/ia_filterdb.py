@@ -178,7 +178,7 @@ async def get_search_results(chat_id, query, file_type=None, max_results=10, off
     if season and episode:
         season_str = f"{season:02d}"
         episode_str = f"{episode:02d}"
-        raw_pattern += r'.*s' + season_str + r'[\s\.\-_]*ep?' + episode_str
+        raw_pattern += r'.*s' + season_str + r'[\s\._-]*e[p\s\._-]*' + episode_str
 
     if language and language != "english":
         lang_regex = get_language_regex(language)
