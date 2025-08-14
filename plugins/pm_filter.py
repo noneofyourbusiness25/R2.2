@@ -381,6 +381,7 @@ async def lang_select_cb_handler(client: Client, query: CallbackQuery):
     await auto_filter(client, search, query.message.reply_to_message, query.message, True, spoll=(search, files, offset, total_results))
 
 async def auto_filter(client, msg, message, reply_msg, ai_search, spoll=None):
+    imdb = None
     if spoll:
         search, files, offset, total_results = spoll
     else:
@@ -420,54 +421,53 @@ async def auto_filter(client, msg, message, reply_msg, ai_search, spoll=None):
         )
 
     if AUTO_FILTER_REPLY_MSG:
-        if search.upper() in str(files):
-            if settings["imdb"]:
-                imdb = await get_poster(search)
-                if imdb:
-                    caption = script.IMDB_TEMPLATE.format(
-                        title=imdb['title'],
-                        votes=imdb['votes'],
-                        aka=imdb['aka'],
-                        seasons=imdb['seasons'],
-                        box_office=imdb['box_office'],
-                        localized_title=imdb['localized_title'],
-                        kind=imdb['kind'],
-                        imdb_id=imdb["imdb_id"],
-                        cast=imdb["cast"],
-                        runtime=imdb["runtime"],
-                        countries=imdb["countries"],
-                        certificates=imdb["certificates"],
-                        languages=imdb["languages"],
-                        director=imdb["director"],
-                        writer=imdb["writer"],
-                        producer=imdb["producer"],
-                        composer=imdb["composer"],
-                        cinematographer=imdb["cinematographer"],
-                        music_team=imdb["music_team"],
-                        distributors=imdb["distributors"],
-                        release_date=imdb['release_date'],
-                        year=imdb['year'],
-                        genres=imdb['genres'],
-                        poster=imdb['poster'],
-                        plot=imdb['plot'],
-                        query=search
-                    )
-                else:
-                    caption = f"<b>Tɪᴛʟᴇ: {search.upper()}\n\nRᴇǫᴜᴇsᴛᴇד Bʏ: {message.from_user.mention}\n\nTᴏᴛᴀʟ Fɪʟᴇs: {total_results}\n\nEɴᴊᴏʏ Yᴏᴜʀ Mᴏᴠɪᴇ ✨</b>"
+        if settings["imdb"]:
+            imdb = await get_poster(search)
+            if imdb:
+                caption = script.IMDB_TEMPLATE.format(
+                    title=imdb['title'],
+                    votes=imdb['votes'],
+                    aka=imdb['aka'],
+                    seasons=imdb['seasons'],
+                    box_office=imdb['box_office'],
+                    localized_title=imdb['localized_title'],
+                    kind=imdb['kind'],
+                    imdb_id=imdb["imdb_id"],
+                    cast=imdb["cast"],
+                    runtime=imdb["runtime"],
+                    countries=imdb["countries"],
+                    certificates=imdb["certificates"],
+                    languages=imdb["languages"],
+                    director=imdb["director"],
+                    writer=imdb["writer"],
+                    producer=imdb["producer"],
+                    composer=imdb["composer"],
+                    cinematographer=imdb["cinematographer"],
+                    music_team=imdb["music_team"],
+                    distributors=imdb["distributors"],
+                    release_date=imdb['release_date'],
+                    year=imdb['year'],
+                    genres=imdb['genres'],
+                    poster=imdb['poster'],
+                    plot=imdb['plot'],
+                    query=search
+                )
             else:
-                caption = f"<b>Tɪᴛʟᴇ: {search.upper()}\n\nRᴇǫᴜᴇsᴛᴇᴅ Bʏ: {message.from_user.mention}\n\nTᴏᴛᴀʟ Fɪʟᴇs: {total_results}\n\nEɴᴊᴏʏ Yᴏᴜʀ Mᴏᴠɪᴇ ✨</b>"
+                caption = f"<b>Tɪᴛʟᴇ: {search.upper()}\n\nRᴇǫᴜᴇsᴛᴇד Bʏ: {message.from_user.mention}\n\nTᴏᴛᴀʟ Fɪʟᴇs: {total_results}\n\nEɴᴊᴏʏ Yᴏᴜʀ Mᴏᴠɪᴇ ✨</b>"
+        else:
+            caption = f"<b>Tɪᴛʟᴇ: {search.upper()}\n\nRᴇǫᴜᴇsᴛᴇᴅ Bʏ: {message.from_user.mention}\n\nTᴏᴛᴀʟ Fɪʟᴇs: {total_results}\n\nEɴᴊᴏʏ Yᴏᴜʀ Mᴏᴠɪᴇ ✨</b>"
 
-            if imdb and imdb.get('poster'):
-                try:
-                    await reply_msg.delete()
-                    await message.reply_photo(photo=imdb.get('poster'), caption=caption, reply_markup=InlineKeyboardMarkup(btn))
-                    return
-                except (MediaEmpty, PhotoInvalidDimensions, WebpageMediaEmpty):
-                    await message.reply_text(caption, reply_markup=InlineKeyboardMarkup(btn))
-                    return
-            else:
-                await reply_msg.edit_text(caption, reply_markup=InlineKeyboardMarkup(btn))
+        if imdb and imdb.get('poster'):
+            try:
+                await reply_msg.delete()
+                await message.reply_photo(photo=imdb.get('poster'), caption=caption, reply_markup=InlineKeyboardMarkup(btn))
                 return
+            except (MediaEmpty, PhotoInvalidDimensions, WebpageMediaEmpty):
+                await message.reply_text(caption, reply_markup=InlineKeyboardMarkup(btn))
+                return
+        else:
+            await reply_msg.edit_text(caption, reply_markup=InlineKeyboardMarkup(btn))
+            return
     else:
         await reply_msg.delete()
         m = await message.reply_text(f"<b>Tɪᴛʟᴇ: {search.upper()}\n\nRᴇǫᴜᴇsᴛᴇᴅ Bʏ: {message.from_user.mention}\n\nTᴏᴛᴀʟ Fɪʟᴇs: {total_results}\n\nEɴᴊᴏʏ Yᴏᴜʀ Mᴏᴠɪᴇ ✨</b>", reply_markup=InlineKeyboardMarkup(btn))
