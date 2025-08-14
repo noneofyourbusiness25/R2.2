@@ -162,7 +162,7 @@ async def get_search_results(chat_id, query, file_type=None, max_results=10, off
         else:
             name += part + " "
 
-    name = name.strip()
+    name = name.strip().replace('(', '').replace(')', '')
 
     # Build regex
     if not name:
