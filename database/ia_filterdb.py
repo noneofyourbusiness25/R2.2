@@ -96,11 +96,7 @@ def clean_file_name(file_name):
     """Clean and format the file name."""
     if not file_name:
         return ""
-    file_name = re.sub(r"(_|\-|\.|\+)", " ", str(file_name))
-    unwanted_chars = ['[', ']', '(', ')', '{', '}']
-
-    for char in unwanted_chars:
-        file_name = file_name.replace(char, '')
+    file_name = re.sub(r'[\W_]+', ' ', str(file_name))
 
     return ' '.join(filter(lambda x: not x.startswith('@') and not x.startswith('http') and not x.startswith('www.') and not x.startswith('t.me'), file_name.split()))
 
@@ -121,6 +117,7 @@ LANGUAGES = {
     "tamil": ["tamil", "tam"],
     "telugu": ["telugu", "tel"],
     "malayalam": ["malayalam", "mala", "mal"],
+    "kannada": ["kannada", "kan"],
     "japanese": ["japanese", "jap"],
     "korean": ["korean", "ko"],
 }
