@@ -178,19 +178,29 @@ async def get_search_results(chat_id, query, file_type=None, max_results=10, off
     if season and episode:
         season_str = f"{season:02d}"
         episode_str = f"{episode:02d}"
-        raw_pattern += r'.*s' + season_str + r'[\s\._-]*e[p\s\._-]*' + episode_str
 
-    if language and language != "english":
-        lang_regex = get_language_regex(language)
-        if lang_regex:
-            raw_pattern += r'.*' + lang_regex
+        base_pattern = raw_pattern + r'.*s' + season_str
 
-    try:
-        regex = re.compile(raw_pattern, flags=re.IGNORECASE)
-    except re.error:
-        regex = re.escape(query)
+        pattern_e = base_pattern + r'[\s\._-]*e[\s\._-]*' + episode_str
+        pattern_ep = base_pattern + r'[\s\._-]*ep[\s\._-]*' + episode_str
 
-    filter_criteria = {'$or': [{'file_name': regex}, {'caption': regex}]}
+        regex_e = re.compile(pattern_e, re.IGNORECASE)
+        regex_ep = re.compile(pattern_ep, re.IGNORECASE)
+
+        filter_e = {'$or': [{'file_name': regex_e}, {'caption': regex_e}]}
+        filter_ep = {'$or': [{'file_name': regex_ep}, {'caption': regex_ep}]}
+
+        filter_criteria = {'$or': [filter_e, filter_ep]}
+    else:
+        if language and language != "english":
+            lang_regex = get_language_regex(language)
+            if lang_regex:
+                raw_pattern += r'.*' + lang_regex
+        try:
+            regex = re.compile(raw_pattern, flags=re.IGNORECASE)
+        except re.error:
+            regex = re.escape(query)
+        filter_criteria = {'$or': [{'file_name': regex}, {'caption': regex}]}
 
     if language == "english":
         all_other_lang_tokens = [token for lang, tokens in LANGUAGES.items() if lang != 'english' for token in tokens]
