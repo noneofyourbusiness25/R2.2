@@ -2,7 +2,7 @@
 # Subscribe YouTube Channel For Amazing Bot @Tech_VJ
 # Ask Doubt on telegram @KingVJ01
 
-import os, logging, string, asyncio, time, re, ast, random, math, pytz, pyrogram
+import os, logging, string, asyncio, time, re, ast, random, math, pytz, pyrogram, base64
 from datetime import datetime, timedelta, date, time
 from Script import script
 from info import *
@@ -25,7 +25,6 @@ lock = asyncio.Lock()
 
 BUTTON = {}
 BUTTONS = {}
-FRESH = {}
 BUTTONS0 = {}
 BUTTONS1 = {}
 BUTTONS2 = {}
@@ -96,10 +95,7 @@ async def next_page(bot, query):
         offset = int(offset)
     except:
         offset = 0
-    search = FRESH.get(key)
-   # if not search:
-      #  await query.answer(script.OLD_ALRT_TXT.format(query.from_user.first_name),show_alert=True)
-       # return
+    search = base64.urlsafe_b64decode(key).decode()
 
     files, n_offset, total = await get_search_results(query.message.chat.id, search, offset=offset, filter=True)
     logger.info(f"next_page | chat_id={query.message.chat.id} | user_id={query.from_user.id} | search='{search}' | offset_in={offset} | next_offset_raw={n_offset} | total={total} | files_returned={len(files) if files else 0}")
@@ -224,12 +220,12 @@ async def next_page(bot, query):
 
 @Client.on_callback_query(filters.regex(r"^filter_results#"))
 async def filter_results_cb_handler(client: Client, query: CallbackQuery):
-    _, key = query.data.split("#")
+    _, encoded_search = query.data.split("#")
 
     btn = [
-        [InlineKeyboardButton("🎬 Movies", callback_data=f"movies#{key}")],
-        [InlineKeyboardButton("📺 Series", callback_data=f"series#{key}")],
-        [InlineKeyboardButton("⬅️ Back to Home", callback_data=f"next_0_{key}_0")]
+        [InlineKeyboardButton("🎬 Movies", callback_data=f"movies#{encoded_search}")],
+        [InlineKeyboardButton("📺 Series", callback_data=f"series#{encoded_search}")],
+        [InlineKeyboardButton("⬅️ Back to Home", callback_data=f"next_0_{encoded_search}_0")]
     ]
 
     await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(btn))
@@ -237,10 +233,10 @@ async def filter_results_cb_handler(client: Client, query: CallbackQuery):
 @Client.on_callback_query(filters.regex(r"^movies#"))
 async def movies_cb_handler(client: Client, query: CallbackQuery):
     try:
-        _, key, page = query.data.split("#")
+        _, encoded_search, page = query.data.split("#")
         page = int(page)
     except:
-        _, key = query.data.split("#")
+        _, encoded_search = query.data.split("#")
         page = 1
 
     years_per_page = 20
@@ -259,7 +255,7 @@ async def movies_cb_handler(client: Client, query: CallbackQuery):
                 row.append(
                     InlineKeyboardButton(
                         text=f"🗓️ {page_years[i+j]}",
-                        callback_data=f"year#{page_years[i+j]}#{key}"
+                        callback_data=f"year#{page_years[i+j]}#{encoded_search}"
                     )
                 )
         btn.append(row)
@@ -268,27 +264,27 @@ async def movies_cb_handler(client: Client, query: CallbackQuery):
     pagination_buttons = []
     if page > 1:
         pagination_buttons.append(
-            InlineKeyboardButton("« Back", callback_data=f"movies#{key}#{page-1}")
+            InlineKeyboardButton("« Back", callback_data=f"movies#{encoded_search}#{page-1}")
         )
     if end_index < len(years):
         pagination_buttons.append(
-            InlineKeyboardButton("Next »", callback_data=f"movies#{key}#{page+1}")
+            InlineKeyboardButton("Next »", callback_data=f"movies#{encoded_search}#{page+1}")
         )
 
     if pagination_buttons:
         btn.append(pagination_buttons)
 
-    btn.append([InlineKeyboardButton("⬅️ Back to Filter Type", callback_data=f"filter_results#{key}")])
+    btn.append([InlineKeyboardButton("⬅️ Back to Filter Type", callback_data=f"filter_results#{encoded_search}")])
 
     await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(btn))
 
 @Client.on_callback_query(filters.regex(r"^year#"))
 async def year_select_cb_handler(client: Client, query: CallbackQuery):
-    _, year, key = query.data.split("#")
+    _, year, encoded_search = query.data.split("#")
 
-    search = FRESH.get(key)
+    search = base64.urlsafe_b64decode(encoded_search).decode()
     search = f"{search} {year}"
-    FRESH[key] = search
+    new_encoded_search = base64.urlsafe_b64encode(search.encode()).decode()
 
     languages = list(LANGUAGES.keys())
     btn = []
@@ -299,18 +295,18 @@ async def year_select_cb_handler(client: Client, query: CallbackQuery):
                 row.append(
                     InlineKeyboardButton(
                         text=f"🌐 {languages[i+j].title()}",
-                        callback_data=f"lang#{languages[i+j]}#{key}"
+                        callback_data=f"lang#{languages[i+j]}#{new_encoded_search}"
                     )
                 )
         btn.append(row)
 
-    btn.append([InlineKeyboardButton("⬅️ Back", callback_data=f"movies#{key}")])
+    btn.append([InlineKeyboardButton("⬅️ Back", callback_data=f"movies#{encoded_search}")])
 
     await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(btn))
 
 @Client.on_callback_query(filters.regex(r"^series#"))
 async def series_cb_handler(client: Client, query: CallbackQuery):
-    _, key = query.data.split("#")
+    _, encoded_search = query.data.split("#")
 
     seasons = [str(s) for s in range(1, 21)]
     btn = []
@@ -321,22 +317,22 @@ async def series_cb_handler(client: Client, query: CallbackQuery):
                 row.append(
                     InlineKeyboardButton(
                         text=f"📺 Season {seasons[i+j]}",
-                        callback_data=f"season#{seasons[i+j]}#{key}"
+                        callback_data=f"season#{seasons[i+j]}#{encoded_search}"
                     )
                 )
         btn.append(row)
 
-    btn.append([InlineKeyboardButton("⬅️ Back", callback_data=f"filter_results#{key}")])
+    btn.append([InlineKeyboardButton("⬅️ Back", callback_data=f"filter_results#{encoded_search}")])
 
     await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(btn))
 
 @Client.on_callback_query(filters.regex(r"^season#"))
 async def season_select_cb_handler(client: Client, query: CallbackQuery):
-    _, season, key = query.data.split("#")
+    _, season, encoded_search = query.data.split("#")
 
-    search = FRESH.get(key)
+    search = base64.urlsafe_b64decode(encoded_search).decode()
     search = f"{search} s{int(season):02d}"
-    FRESH[key] = search
+    new_encoded_search = base64.urlsafe_b64encode(search.encode()).decode()
 
     episodes_per_page = 20
     episodes = [str(e) for e in range(1, 101)]
@@ -351,22 +347,22 @@ async def season_select_cb_handler(client: Client, query: CallbackQuery):
                 row.append(
                     InlineKeyboardButton(
                         text=f"🎬 {page_episodes[i+j]}",
-                        callback_data=f"episode#{page_episodes[i+j]}#{key}"
+                        callback_data=f"episode#{page_episodes[i+j]}#{new_encoded_search}"
                     )
                 )
         btn.append(row)
 
     if len(episodes) > episodes_per_page:
-        btn.append([InlineKeyboardButton("Next »", callback_data=f"episodes_page#{key}#{season}#2")])
+        btn.append([InlineKeyboardButton("Next »", callback_data=f"episodes_page#{new_encoded_search}#{season}#2")])
 
-    btn.append([InlineKeyboardButton("⬅️ Back to Seasons", callback_data=f"series#{key}")])
+    btn.append([InlineKeyboardButton("⬅️ Back to Seasons", callback_data=f"series#{encoded_search}")])
 
     await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(btn))
 
 
 @Client.on_callback_query(filters.regex(r"^episodes_page#"))
 async def episodes_page_cb_handler(client: Client, query: CallbackQuery):
-    _, key, season, page = query.data.split("#")
+    _, encoded_search, season, page = query.data.split("#")
     page = int(page)
 
     episodes_per_page = 20
@@ -385,7 +381,7 @@ async def episodes_page_cb_handler(client: Client, query: CallbackQuery):
                 row.append(
                     InlineKeyboardButton(
                         text=f"🎬 {page_episodes[i+j]}",
-                        callback_data=f"episode#{page_episodes[i+j]}#{key}"
+                        callback_data=f"episode#{page_episodes[i+j]}#{encoded_search}"
                     )
                 )
         btn.append(row)
@@ -394,28 +390,28 @@ async def episodes_page_cb_handler(client: Client, query: CallbackQuery):
     pagination_buttons = []
     if page > 1:
         pagination_buttons.append(
-            InlineKeyboardButton("« Back", callback_data=f"episodes_page#{key}#{season}#{page-1}")
+            InlineKeyboardButton("« Back", callback_data=f"episodes_page#{encoded_search}#{season}#{page-1}")
         )
     if end_index < len(episodes):
         pagination_buttons.append(
-            InlineKeyboardButton("Next »", callback_data=f"episodes_page#{key}#{season}#{page+1}")
+            InlineKeyboardButton("Next »", callback_data=f"episodes_page#{encoded_search}#{season}#{page+1}")
         )
 
     if pagination_buttons:
         btn.append(pagination_buttons)
 
-    btn.append([InlineKeyboardButton("⬅️ Back to Seasons", callback_data=f"series#{key}")])
+    btn.append([InlineKeyboardButton("⬅️ Back to Seasons", callback_data=f"series#{encoded_search}")])
 
     await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(btn))
 
 
 @Client.on_callback_query(filters.regex(r"^episode#"))
 async def episode_select_cb_handler(client: Client, query: CallbackQuery):
-    _, episode, key = query.data.split("#")
+    _, episode, encoded_search = query.data.split("#")
 
-    search = FRESH.get(key)
+    search = base64.urlsafe_b64decode(encoded_search).decode()
     search = f"{search}e{int(episode):02d}"
-    FRESH[key] = search
+    new_encoded_search = base64.urlsafe_b64encode(search.encode()).decode()
 
     languages = list(LANGUAGES.keys())
     btn = []
@@ -426,20 +422,20 @@ async def episode_select_cb_handler(client: Client, query: CallbackQuery):
                 row.append(
                     InlineKeyboardButton(
                         text=f"🌐 {languages[i+j].title()}",
-                        callback_data=f"lang#{languages[i+j]}#{key}"
+                        callback_data=f"lang#{languages[i+j]}#{new_encoded_search}"
                     )
                 )
         btn.append(row)
 
-    btn.append([InlineKeyboardButton("⬅️ Back", callback_data=f"season#1#{key}")]) # a bit of a hack here, we don't know the season number
+    btn.append([InlineKeyboardButton("⬅️ Back", callback_data=f"season#1#{encoded_search}")]) # a bit of a hack here, we don't know the season number
 
     await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(btn))
 
 @Client.on_callback_query(filters.regex(r"^lang#"))
 async def lang_select_cb_handler(client: Client, query: CallbackQuery):
-    _, lang, key = query.data.split("#")
+    _, lang, encoded_search = query.data.split("#")
 
-    search = FRESH.get(key)
+    search = base64.urlsafe_b64decode(encoded_search).decode()
     search = f"{search} {lang}"
 
     # Final search
@@ -462,10 +458,9 @@ async def auto_filter(client, msg, message, reply_msg, ai_search, spoll=None):
     if not files:
         return
 
-    key = f"{message.chat.id}-{message.id}"
-    FRESH[key] = search
-
     settings = await get_settings(message.chat.id)
+    encoded_search = base64.urlsafe_b64encode(search.encode()).decode()
+
     if settings["button"]:
         btn = [
             [
@@ -480,15 +475,15 @@ async def auto_filter(client, msg, message, reply_msg, ai_search, spoll=None):
         btn = []
 
     btn.insert(0, [
-        InlineKeyboardButton("𝐒𝐞𝐧𝐝 𝐀𝐥𝐥", callback_data=f"sendfiles#{key}")
+        InlineKeyboardButton("𝐒𝐞𝐧𝐝 𝐀𝐥𝐥", callback_data=f"sendfiles#{encoded_search}")
     ])
     btn.insert(1, [
-        InlineKeyboardButton("🔍 Filter Results", callback_data=f"filter_results#{key}")
+        InlineKeyboardButton("🔍 Filter Results", callback_data=f"filter_results#{encoded_search}")
     ])
 
     if offset != 0:
         btn.append(
-            [InlineKeyboardButton("𝐏𝐀𝐆𝐄", callback_data="pages"), InlineKeyboardButton(f"1/{math.ceil(total_results/10)}", callback_data="pages"), InlineKeyboardButton("𝐍𝐄𝐗𝐓 ➪", callback_data=f"next_0_{key}_{offset}")]
+            [InlineKeyboardButton("𝐏𝐀𝐆𝐄", callback_data="pages"), InlineKeyboardButton(f"1/{math.ceil(total_results/10)}", callback_data="pages"), InlineKeyboardButton("𝐍𝐄𝐗𝐓 ➪", callback_data=f"next_0_{encoded_search}_{offset}")]
         )
 
     if AUTO_FILTER_REPLY_MSG:
