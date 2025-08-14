@@ -129,71 +129,85 @@ def get_language_regex(language):
     tokens = LANGUAGES[language]
     return r'\b(' + '|'.join(tokens) + r')\b'
 
+STOP_WORDS = ["download", "full", "hd", "send", "movie", "series"]
+
+def normalize_and_generate_regex(query_text):
+    # Clean the query by removing stop words
+    query_text = ' '.join([word for word in query_text.split() if word.lower() not in STOP_WORDS])
+
+    # --- Parse Season/Episode ---
+    season = None
+    episode = None
+    season_match = re.search(r'\b(s|season)\s?(\d{1,2})\b', query_text, re.IGNORECASE)
+    if season_match:
+        season = int(season_match.group(2))
+        query_text = query_text.replace(season_match.group(0), '')
+
+    episode_match = re.search(r'\b(e|ep|episode)\s?(\d{1,3})\b', query_text, re.IGNORECASE)
+    if episode_match:
+        episode = int(episode_match.group(2))
+        query_text = query_text.replace(episode_match.group(0), '')
+
+    # --- Parse Year ---
+    year = None
+    year_match = re.search(r'\b(19|20)\d{2}\b', query_text)
+    if year_match:
+        year = year_match.group(0)
+        query_text = query_text.replace(year_match.group(0), '')
+
+    # --- The rest is the title ---
+    title = query_text.strip()
+
+    # --- Build Regex ---
+    regex_parts = []
+    if title:
+        title_parts = title.split(' ')
+        regex_parts.append(''.join([f'(?=.*{re.escape(part)})' for part in title_parts]))
+
+    if year:
+        regex_parts.append(f'(?=.*{year})')
+
+    if season is not None and episode is not None:
+        s_str = f"{season:01d}"
+        s0_str = f"{season:02d}"
+        e_str = f"{episode:01d}"
+        e0_str = f"{episode:02d}"
+
+        se_regex = f"S(0?{s_str}|{s0_str})[\\s\\._-]*E(P|p)?(0?{e_str}|{e0_str})"
+        regex_parts.append(f'(?=.*{se_regex})')
+    elif season is not None:
+        s_str = f"{season:01d}"
+        s0_str = f"{season:02d}"
+        s_regex = f"S(0?{s_str}|{s0_str})"
+        regex_parts.append(f'(?=.*{s_regex})')
+
+    final_regex = ''.join(regex_parts)
+
+    return final_regex if final_regex else ".*" # Return ".*" if no parts were found
+
 async def get_search_results(chat_id, query, file_type=None, max_results=10, offset=0, filter=False):
     """For given query return (results, next_offset)"""
 
     start_time = time.monotonic()
 
-    query = query.strip()
+    raw_pattern = normalize_and_generate_regex(query)
 
-    # Parse query
-    name = ""
-    year = None
-    season = None
-    episode = None
+    try:
+        regex = re.compile(raw_pattern, flags=re.IGNORECASE)
+    except re.error:
+        regex = re.escape(query)
+
+    filter_criteria = {'$or': [{'file_name': regex}, {'caption': regex}]}
+
+    # Extract language from query for filtering, but don't use it for the main search pattern
     language = None
-
     parts = query.split()
     for part in parts:
-        if part.isdigit() and len(part) == 4:
-            year = part
-        elif part.lower() in [lang for sublist in LANGUAGES.values() for lang in sublist]:
+        if part.lower() in [lang for sublist in LANGUAGES.values() for lang in sublist]:
             for lang, tokens in LANGUAGES.items():
                 if part.lower() in tokens:
                     language = lang
                     break
-        elif re.match(r"s(\d{1,2})e(\d{1,3})", part.lower()):
-            match = re.match(r"s(\d{1,2})e(\d{1,3})", part.lower())
-            season = int(match.group(1))
-            episode = int(match.group(2))
-        else:
-            name += part + " "
-
-    name = name.strip().replace('(', '').replace(')', '')
-
-    # Build regex
-    if not name:
-        raw_pattern = '.'
-    elif ' ' not in name:
-        raw_pattern = r'(\b|[\.\+\-_])' + re.escape(name) + r'(\b|[\.\+\-_])'
-    else:
-        raw_pattern = r'.*'.join(map(re.escape, name.split(' ')))
-
-    if year:
-        raw_pattern += r'.*' + re.escape(year)
-
-    if season and episode:
-        season_str = f"{season:02d}"
-        episode_str = f"{episode:02d}"
-
-        base_pattern = raw_pattern + r'.*s' + season_str
-
-        pattern_e = base_pattern + r'[\s\._-]*e[\s\._-]*' + episode_str
-        pattern_ep = base_pattern + r'[\s\._-]*ep[\s\._-]*' + episode_str
-
-        regex_e = re.compile(pattern_e, re.IGNORECASE)
-        regex_ep = re.compile(pattern_ep, re.IGNORECASE)
-
-        filter_e = {'$or': [{'file_name': regex_e}, {'caption': regex_e}]}
-        filter_ep = {'$or': [{'file_name': regex_ep}, {'caption': regex_ep}]}
-
-        filter_criteria = {'$or': [filter_e, filter_ep]}
-    else:
-        try:
-            regex = re.compile(raw_pattern, flags=re.IGNORECASE)
-        except re.error:
-            regex = re.escape(query)
-        filter_criteria = {'$or': [{'file_name': regex}, {'caption': regex}]}
 
     if language and language != "english":
         lang_regex = re.compile(get_language_regex(language), re.IGNORECASE)
