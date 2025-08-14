@@ -622,16 +622,20 @@ async def get_clone_shortlink(link, url, api):
     return link
 
 async def get_shortlink(chat_id, link):
-    settings = await get_settings(chat_id) #fetching settings for group
-    if 'shortlink' in settings.keys():
-        URL = settings['shortlink']
-        API = settings['shortlink_api']
-    else:
-        URL = SHORTLINK_URL
-        API = SHORTLINK_API
+    settings = await get_settings(chat_id) # Group specific settings
+    bot_settings = await db.get_bot_settings() # Global bot settings
+
+    # Prioritize group-specific settings, fallback to global, then to None
+    URL = settings.get('shortlink_url') or bot_settings.get('shortlink_url')
+    API = settings.get('shortlink_api') or bot_settings.get('shortlink_api')
+
+    if not URL or not API:
+        return link # Return original link if no shortener is configured
+
     if URL.startswith("shorturllink") or URL.startswith("terabox.in") or URL.startswith("urlshorten.in"):
-        URL = SHORTLINK_URL
-        API = SHORTLINK_API
+        # Fallback for misconfigured URLs
+        URL = bot_settings.get('shortlink_url')
+        API = bot_settings.get('shortlink_api')
     if URL == "api.shareus.io":
         url = f'https://{URL}/easy_api'
         params = {
@@ -695,10 +699,18 @@ async def get_token(bot, userid, link):
     if not await db.is_user_exist(user.id):
         await db.add_user(user.id, user.first_name)
         await bot.send_message(LOG_CHANNEL, script.LOG_TEXT_P.format(user.id, user.mention))
+
+    settings = await db.get_bot_settings()
+
     token = ''.join(random.choices(string.ascii_letters + string.digits, k=7))
     await db.update_token(user.id, token)
     link = f"{link}verify-{user.id}-{token}"
-    shortened_verify_url = await get_verify_shorted_link(link, VERIFY_SHORTLINK_URL, VERIFY_SHORTLINK_API)
+
+    verify_shortlink_url = settings.get("verify_shortlink_url")
+    verify_shortlink_api = settings.get("verify_shortlink_api")
+
+    shortened_verify_url = await get_verify_shorted_link(link, verify_shortlink_url, verify_shortlink_api)
+
     if VERIFY_SECOND_SHORTNER == True:
         snd_link = await get_verify_shorted_link(shortened_verify_url, VERIFY_SND_SHORTLINK_URL, VERIFY_SND_SHORTLINK_API)
         return str(snd_link)
@@ -732,7 +744,7 @@ async def send_all(bot, userid, files, ident, chat_id, user_name, query):
             for file in files:
                 title = file["file_name"]
                 size = get_size(file["file_size"])
-                if not await db.has_premium_access(userid) and SHORTLINK_MODE == True:
+                if not await db.has_premium_access(userid) and (await db.get_bot_settings()).get('shortlink_mode') == True:
                     await bot.send_message(chat_id=userid, text=f"<b>Hᴇʏ ᴛʜᴇʀᴇ {user_name} 👋🏽 \n\n✅ Sᴇᴄᴜʀᴇ ʟɪɴᴋ ᴛᴏ ʏᴏᴜʀ ғɪʟᴇ ʜᴀs sᴜᴄᴄᴇssғᴜʟʟʏ ʙᴇᴇɴ ɢᴇɴᴇʀᴀᴛᴇᴅ ᴘʟᴇᴀsᴇ ᴄʟɪᴄᴋ ᴅᴏᴡɴʟᴏᴀᴅ ʙᴜᴛᴛᴏɴ\n\n🗃️ Fɪʟᴇ Nᴀᴍᴇ : {title}\n🔖 Fɪʟᴇ Sɪᴢᴇ : {size}</b>", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("📤 Dᴏᴡɴʟᴏᴀᴅ 📥", url=await get_shortlink(chat_id, f"https://telegram.me/{temp.U_NAME}?start=files_{file['file_id']}"))]]))
         else:
             for file in files:

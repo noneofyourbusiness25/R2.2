@@ -56,6 +56,14 @@ default_setgs = {
     'is_tutorial': IS_TUTORIAL
 }
 
+from info import VERIFY, VERIFY_SHORTLINK_URL, VERIFY_SHORTLINK_API
+
+bot_info_setgs = {
+    '_id': 'bot_settings',
+    'verify': VERIFY,
+    'verify_shortlink_url': VERIFY_SHORTLINK_URL,
+    'verify_shortlink_api': VERIFY_SHORTLINK_API,
+}
 
 class Database:
 
@@ -66,6 +74,7 @@ class Database:
         self.grp = self.db.groups
         self.users = self.db.uersz
         self.bot = self.db.clone_bots
+        self.bot_info = self.db.bot_info
 
 
     def new_user(self, id, name):
@@ -328,5 +337,14 @@ class Database:
         user = await self.col.find_one({'id': int(user_id)})
         return user.get('token') if user else None
 
+    async def get_bot_settings(self):
+        settings = await self.bot_info.find_one({'_id': 'bot_settings'})
+        if not settings:
+            await self.bot_info.insert_one(bot_info_setgs)
+            return bot_info_setgs
+        return settings
+
+    async def update_bot_settings(self, key, value):
+        await self.bot_info.update_one({'_id': 'bot_settings'}, {'$set': {key: value}})
 
 db = Database(USER_DB_URI, DATABASE_NAME)
