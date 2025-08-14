@@ -252,9 +252,9 @@ async def movies_cb_handler(client: Client, query: CallbackQuery):
     page_years = years[start_index:end_index]
 
     btn = []
-    for i in range(0, len(page_years), 4):
+    for i in range(0, len(page_years), 3):
         row = []
-        for j in range(4):
+        for j in range(3):
             if i+j < len(page_years):
                 row.append(
                     InlineKeyboardButton(
@@ -314,13 +314,13 @@ async def series_cb_handler(client: Client, query: CallbackQuery):
 
     seasons = [str(s) for s in range(1, 21)]
     btn = []
-    for i in range(0, len(seasons), 4):
+    for i in range(0, len(seasons), 3):
         row = []
-        for j in range(4):
+        for j in range(3):
             if i+j < len(seasons):
                 row.append(
                     InlineKeyboardButton(
-                        text=f"Season {seasons[i+j]}",
+                        text=f"📺 Season {seasons[i+j]}",
                         callback_data=f"season#{seasons[i+j]}#{key}"
                     )
                 )
@@ -344,13 +344,13 @@ async def season_select_cb_handler(client: Client, query: CallbackQuery):
     page_episodes = episodes[:episodes_per_page]
 
     btn = []
-    for i in range(0, len(page_episodes), 5):
+    for i in range(0, len(page_episodes), 4):
         row = []
-        for j in range(5):
+        for j in range(4):
             if i+j < len(page_episodes):
                 row.append(
                     InlineKeyboardButton(
-                        text=f"🎞️ {page_episodes[i+j]}",
+                        text=f"🎬 {page_episodes[i+j]}",
                         callback_data=f"episode#{page_episodes[i+j]}#{key}"
                     )
                 )
@@ -378,13 +378,13 @@ async def episodes_page_cb_handler(client: Client, query: CallbackQuery):
     page_episodes = episodes[start_index:end_index]
 
     btn = []
-    for i in range(0, len(page_episodes), 5):
+    for i in range(0, len(page_episodes), 4):
         row = []
-        for j in range(5):
+        for j in range(4):
             if i+j < len(page_episodes):
                 row.append(
                     InlineKeyboardButton(
-                        text=f"🎞️ {page_episodes[i+j]}",
+                        text=f"🎬 {page_episodes[i+j]}",
                         callback_data=f"episode#{page_episodes[i+j]}#{key}"
                     )
                 )

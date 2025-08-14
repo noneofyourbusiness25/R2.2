@@ -170,7 +170,7 @@ async def get_search_results(chat_id, query, file_type=None, max_results=10, off
     elif ' ' not in name:
         raw_pattern = r'(\b|[\.\+\-_])' + re.escape(name) + r'(\b|[\.\+\-_])'
     else:
-        raw_pattern = re.escape(name).replace(' ', r'.*[\s\.\+\-_]')
+        raw_pattern = r'.*'.join(map(re.escape, name.split(' ')))
 
     if year:
         raw_pattern += r'.*' + re.escape(year)
