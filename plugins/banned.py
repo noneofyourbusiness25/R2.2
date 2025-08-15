@@ -3,7 +3,7 @@
 # Ask Doubt on telegram @KingVJ01
 
 from pyrogram import Client, filters
-from plugins.helpers import temp
+from utils import temp
 from pyrogram.types import Message
 from database.users_chats_db import db
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup

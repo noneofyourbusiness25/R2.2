@@ -3,7 +3,7 @@
 # Ask Doubt on telegram @KingVJ01
 
 import re, os, json, base64, logging
-from plugins.helpers import temp
+from utils import temp
 from pyrogram import filters, Client, enums
 from pyrogram.errors.exceptions.bad_request_400 import ChannelInvalid, UsernameInvalid, UsernameNotModified
 from info import ADMINS, LOG_CHANNEL, FILE_STORE_CHANNEL, PUBLIC_FILE_STORE

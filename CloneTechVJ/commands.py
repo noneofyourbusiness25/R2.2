@@ -14,7 +14,7 @@ from database.users_chats_db import db
 from CloneTechVJ.database.clone_bot_userdb import clonedb
 from info import *
 from shortzy import Shortzy
-from plugins.helpers import get_size, temp, get_seconds, get_clone_shortlink
+from utils import get_size, temp, get_seconds, get_clone_shortlink
 logger = logging.getLogger(__name__)
 
 @Client.on_message(filters.command("start") & filters.incoming)
