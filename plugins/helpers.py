@@ -1,46 +1,14 @@
-import re, os, json, random, asyncio, logging, string, http.client
-from info import *
-from imdb import Cinemagoer
-from pyrogram.types import Message, InlineKeyboardButton, InlineKeyboardMarkup
-from pyrogram import enums
-from pyrogram.errors import *
-from typing import Union, List
-from Script import script
-from datetime import datetime
-from database.users_chats_db import db
-from database.join_reqs import JoinReqs
-from bs4 import BeautifulSoup
-from shortzy import Shortzy
-
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
-imdb = Cinemagoer()
-BTN_URL_REGEX = re.compile(r"(\[([^\[]+?)\]\((buttonurl|buttonalert):(?:/{0,2})(.+?)(:same)?\))")
-SMART_OPEN = '“'
-SMART_CLOSE = '”'
-START_CHAR = ('\'', '"', SMART_OPEN)
-
-class temp(object):
-    BANNED_USERS = []
-    BANNED_CHATS = []
-    ME = None
-    BOT = None
-    CURRENT=int(os.environ.get("SKIP", 2))
-    CANCEL = False
-    MELCOW = {}
-    U_NAME = None
-    B_NAME = None
-    GETALL = {}
-    SHORT = {}
-    SETTINGS = {}
-    IMDB_CAP = {}
+import re
 
 # --- 1. Preprocessing & Normalization ---
 
-def normalize_text(text):
+def normalize_query(text):
+    """Normalizes a query string for searching."""
     if not text: return ""
     text = text.lower()
+    # Replace dots, underscores, etc., with spaces
     text = re.sub(r'[\.\_\-\(\)\[\]]+', ' ', text)
+    # Remove extra spaces
     text = re.sub(r'\s+', ' ', text).strip()
     return text
 
@@ -61,179 +29,111 @@ NOISE_TOKENS = [
     '10bit', 'truehd', 'atmos', 'ddp', '5.1', 'hdrip', 'remux', 'proper', 'internal',
     'multi', 'sub', 'download', 'movie', 'series', 'tv'
 ]
-SE_REGEX_PATTERNS = [
-    re.compile(r'(?i)\bS(?:eason)?[ ._\-]?0*(\d{1,2})[ ._\-]?[Ee](?:P|p|pisode)?[ ._\-]?0*(\d{1,3})\b'),
-    re.compile(r'(?i)\bSeason[ ._\-]?0*(\d{1,2})[ ._\-]?Episode[ ._\-]?0*(\d{1,3})\b'),
-    re.compile(r'(?i)\b0*(\d{1,2})x0*(\d{1,3})\b'),
-    re.compile(r'(?i)\bEP(?:isode)?[ ._\-]?0*(\d{1,3})\b'),
-    re.compile(r'(?i)\bE[ ._\-]?0*(\d{1,3})\b')
-]
+SE_REGEX = re.compile(r'\b(s|season)\s?0*(\d{1,2})\b', re.IGNORECASE)
+EP_REGEX = re.compile(r'\b(e|ep|episode)\s?0*(\d{1,3})\b', re.IGNORECASE)
 
-def get_title_tokens(text):
-    tokens = text.split()
-    tokens = [t for t in tokens if t not in NOISE_TOKENS and t.lower() not in ALL_LANG_TOKENS]
-    for pattern in SE_REGEX_PATTERNS:
-        text = pattern.sub('', text)
-    return text.split()
+def extract_filters(query):
+    """Extracts filters (year, language, season, episode) from a normalized query."""
+    filters = {'year': None, 'language': None, 'season': None, 'episode': None}
 
-def extract_metadata(file_data):
-    filename = file_data.get('file_name', '')
-    caption = file_data.get('caption', '')
-    full_text_raw = f"{filename} {caption if caption else ''}"
-    normalized_text = normalize_text(full_text_raw)
+    # Extract year
+    year_match = re.search(r'\b((?:19|20)\d{2})\b', query)
+    if year_match:
+        filters['year'] = year_match.group(1)
+        query = query.replace(year_match.group(1), '', 1).strip()
 
-    meta = {
-        'season': None, 'episode': None, 'language': None, 'year': None,
-        'title_tokens': [], 'raw_title': filename.rsplit('.', 1)[0]
-    }
-    text_to_parse = normalized_text
-
-    for pattern in SE_REGEX_PATTERNS:
-        match = pattern.search(text_to_parse)
-        if match:
-            groups = match.groups()
-            if len(groups) == 2:
-                meta['season'], meta['episode'] = int(groups[0]), int(groups[1])
-            elif len(groups) == 1:
-                meta['episode'] = int(groups[0])
-            text_to_parse = pattern.sub(' ', text_to_parse).strip()
-            if meta.get('season') and meta.get('episode'):
-                break
-
-    lang_match = LANGUAGE_REGEX.search(text_to_parse)
+    # Extract language
+    lang_match = LANGUAGE_REGEX.search(query)
     if lang_match:
         found_token = lang_match.group(1).lower()
         for lang, tokens in LANGUAGES.items():
             if found_token in tokens:
-                meta['language'] = lang
+                filters['language'] = lang
                 break
-        if meta['language']:
-            text_to_parse = LANGUAGE_REGEX.sub(' ', text_to_parse).strip()
+        if filters['language']:
+            query = LANGUAGE_REGEX.sub('', query).strip()
 
-    year_match = re.search(r'\b((?:19|20)\d{2})\b', text_to_parse)
-    if year_match:
-        meta['year'] = int(year_match.group(1))
-        text_to_parse = text_to_parse.replace(year_match.group(1), ' ', 1).strip()
+    # Extract season
+    season_match = SE_REGEX.search(query)
+    if season_match:
+        filters['season'] = season_match.group(2)
+        query = SE_REGEX.sub('', query).strip()
 
-    meta['title_tokens'] = get_title_tokens(text_to_parse)
-    return meta
+    # Extract episode
+    episode_match = EP_REGEX.search(query)
+    if episode_match:
+        filters['episode'] = episode_match.group(2)
+        query = EP_REGEX.sub('', query).strip()
+
+    # The rest is the base title
+    base_query = ' '.join([word for word in query.split() if word not in NOISE_TOKENS])
+
+    return base_query, filters
 
 # --- 3. Matching & Scoring ---
 
-def compute_score(query_meta, file_meta):
-    w = {'title': 0.40, 'season': 0.18, 'episode': 0.18, 'language': 0.12, 'caption': 0.06, 'exact_order': 0.06}
-    score = 0.0
-    query_title_tokens = set(query_meta['title_tokens'])
-    file_title_tokens = set(file_meta['title_tokens'])
+def calculate_score(file_name, filters):
+    """Calculates a relevance score for a file based on the user's filters."""
+    normalized_file_name = normalize_query(file_name)
+    score = 0
+    matched_filters = []
+
+    # Base title match (Jaccard similarity)
+    query_title_tokens = set(filters.get('title', '').split())
+    file_title_tokens = set(normalized_file_name.split())
+
+    # Remove noise from file title tokens for a cleaner match
+    file_title_tokens = {token for token in file_title_tokens if token not in NOISE_TOKENS and not token.isdigit()}
 
     if query_title_tokens:
         intersection = len(query_title_tokens.intersection(file_title_tokens))
         union = len(query_title_tokens.union(file_title_tokens))
         title_score = intersection / union if union > 0 else 0
-        extra_words = len(file_title_tokens - query_title_tokens)
-        title_score -= (extra_words * 0.05)
-        score += w['title'] * max(0, title_score)
 
-    if query_meta.get('season'):
-        score += w['season'] if query_meta['season'] == file_meta['season'] else -0.5
-    if query_meta.get('episode'):
-        score += w['episode'] if query_meta['episode'] == file_meta['episode'] else 0
-    if query_meta.get('language'):
-        if query_meta['language'] == file_meta['language']:
-            score += w['language']
-        elif file_meta['language'] is not None:
+        # Penalize for extra words in the file name
+        extra_words_penalty = len(file_title_tokens - query_title_tokens) * 0.05
+        title_score = max(0, title_score - extra_words_penalty)
+
+        if title_score > 0.1: # Threshold to consider it a match
+            score += title_score * 0.5 # Title match is 50% of the score
+            matched_filters.append('title')
+
+    # Filter matching
+    # Year
+    if filters.get('year'):
+        if filters['year'] in normalized_file_name:
+            score += 0.2
+            matched_filters.append('year')
+        else:
+            score -= 0.5 # Heavy penalty if year is specified but doesn't match
+
+    # Language
+    if filters.get('language'):
+        lang_tokens = LANGUAGES.get(filters['language'], [])
+        if any(token in normalized_file_name for token in lang_tokens):
+            score += 0.15
+            matched_filters.append('language')
+        else:
+            # Check if any other language is present
+            if LANGUAGE_REGEX.search(normalized_file_name):
+                 score -= 0.5 # Heavy penalty if another language is present
+
+    # Season
+    if filters.get('season'):
+        se_str = f"s{int(filters['season']):02d}"
+        if se_str in normalized_file_name:
+            score += 0.15
+            matched_filters.append('season')
+        else:
             score -= 0.5
-    return max(0, score)
 
-# --- Other Helper Functions from utils.py ---
+    # Episode
+    if filters.get('episode'):
+        ep_str = f"e{int(filters['episode']):02d}"
+        if ep_str in normalized_file_name:
+            score += 0.15
+            matched_filters.append('episode')
+        else:
+            score -= 0.5
 
-def get_size(size):
-    if not size:
-        return "0B"
-    units = ["Bytes", "KB", "MB", "GB", "TB", "PB", "EB"]
-    size = float(size)
-    i = 0
-    while size >= 1024.0 and i < len(units):
-        i += 1
-        size /= 1024.0
-    return "%.2f %s" % (size, units[i])
-
-async def get_settings(group_id):
-    return await db.get_settings(group_id)
-
-async def save_group_settings(group_id, key, value):
-    current = await get_settings(group_id)
-    current.update({key: value})
-    await db.update_settings(group_id, current)
-
-async def is_subscribed(bot, query):
-    try:
-        user = await bot.get_chat_member(AUTH_CHANNEL, query.from_user.id)
-        return user.status not in [enums.ChatMemberStatus.BANNED, enums.ChatMemberStatus.LEFT]
-    except UserNotParticipant:
-        return False
-    except Exception:
-        return True
-
-async def pub_is_subscribed(bot, query, channel):
-    btn = []
-    for id in channel:
-        chat = await bot.get_chat(int(id))
-        try:
-            await bot.get_chat_member(id, query.from_user.id)
-        except UserNotParticipant:
-            btn.append([InlineKeyboardButton(f'Join {chat.title}', url=chat.invite_link)])
-    return btn
-
-async def get_shortlink(chat_id, link):
-    settings = await get_settings(chat_id)
-    URL = settings.get('shortlink_url')
-    API = settings.get('shortlink_api')
-    if not URL or not API:
-        return link
-    try:
-        shortzy = Shortzy(api_key=API, base_site=URL)
-        link = await shortzy.convert(link)
-    except Exception as e:
-        logger.error(e)
-    return link
-
-async def get_tutorial(chat_id):
-    settings = await get_settings(chat_id)
-    return settings.get('tutorial')
-
-async def get_seconds(time_string):
-    def extract_value_and_unit(ts):
-        value = "".join(filter(str.isdigit, ts))
-        unit = "".join(filter(str.isalpha, ts))
-        return int(value) if value else 0, unit
-    value, unit = extract_value_and_unit(time_string)
-    if unit == 's': return value
-    elif unit == 'min': return value * 60
-    elif unit == 'hour': return value * 3600
-    elif unit == 'day': return value * 86400
-    elif unit == 'month': return value * 86400 * 30
-    elif unit == 'year': return value * 86400 * 365
-    return 0
-
-async def check_token(bot, userid, token):
-    user = await bot.get_users(userid)
-    if not await db.is_user_exist(user.id):
-        await db.add_user(user.id, user.first_name)
-    db_token = await db.get_token(user.id)
-    return db_token and db_token == token
-
-async def get_token(bot, userid, link):
-    user = await bot.get_users(userid)
-    if not await db.is_user_exist(user.id):
-        await db.add_user(user.id, user.first_name)
-    token = ''.join(random.choices(string.ascii_letters + string.digits, k=7))
-    await db.update_token(user.id, token)
-    return f"{link}verify-{user.id}-{token}"
-
-async def verify_user(bot, userid, token):
-    await db.update_verification(userid, verified=True, verified_time=datetime.now())
-    await db.update_token(userid, token=None)
-
-async def check_verification(bot, userid):
-    return await db.get_verification_status(userid)
+    return max(0, score), matched_filters

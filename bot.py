@@ -6,6 +6,9 @@
 
 import sys, glob, importlib, logging, logging.config, pytz, asyncio
 from pathlib import Path
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # Get logging configurations
 logging.config.fileConfig('logging.conf')
@@ -16,7 +19,7 @@ logging.getLogger("cinemagoer").setLevel(logging.ERROR)
 from pyrogram import Client, idle
 from database.users_chats_db import db
 from info import *
-from plugins.helpers import temp
+from utils import temp
 from typing import Union, Optional, AsyncGenerator
 from Script import script
 from datetime import date, datetime

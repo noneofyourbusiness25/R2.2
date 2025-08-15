@@ -13,7 +13,7 @@ from database.filters_mdb import(
 )
 
 from database.connections_mdb import active_connection
-from utils import get_file_id, parser, split_quotes
+from plugins.helpers import get_file_id, parser, split_quotes
 from info import ADMINS
 
 
@@ -87,7 +87,7 @@ async def addfilter(client, message):
             alert = None
         except:
             reply_text = ""
-            btn = "[]" 
+            btn = "[]"
             fileid = None
             alert = None
 
@@ -122,7 +122,7 @@ async def addfilter(client, message):
 
 @Client.on_message(filters.command(['viewfilters', 'filters']) & filters.incoming)
 async def get_all(client, message):
-    
+
     chat_type = message.chat.type
     userid = message.from_user.id if message.from_user else None
     if not userid:
@@ -183,7 +183,7 @@ async def get_all(client, message):
         quote=True,
         parse_mode=enums.ParseMode.MARKDOWN
     )
-        
+
 @Client.on_message(filters.command('del') & filters.incoming)
 async def deletefilter(client, message):
     userid = message.from_user.id if message.from_user else None
@@ -233,7 +233,7 @@ async def deletefilter(client, message):
     query = text.lower()
 
     await delete_filter(message, query, grp_id)
-        
+
 
 @Client.on_message(filters.command('delall') & filters.incoming)
 async def delallconfirm(client, message):
@@ -273,4 +273,3 @@ async def delallconfirm(client, message):
             ]),
             quote=True
         )
-

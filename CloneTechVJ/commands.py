@@ -14,13 +14,8 @@ from database.users_chats_db import db
 from CloneTechVJ.database.clone_bot_userdb import clonedb
 from info import *
 from shortzy import Shortzy
-from plugins.helpers import get_size, temp, get_seconds
+from plugins.helpers import get_size, temp, get_seconds, get_clone_shortlink
 logger = logging.getLogger(__name__)
-
-async def get_clone_shortlink(link, url, api):
-    shortzy = Shortzy(api_key=api, base_site=url)
-    link = await shortzy.convert(link)
-    return link
 
 @Client.on_message(filters.command("start") & filters.incoming)
 async def start(client, message):

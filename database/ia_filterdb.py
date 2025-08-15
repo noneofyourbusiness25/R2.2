@@ -8,47 +8,64 @@ from struct import pack
 from pyrogram.file_id import FileId
 from pymongo import MongoClient
 from pymongo.errors import DuplicateKeyError, BulkWriteError
-from info import FILE_DB_URI, SEC_FILE_DB_URI, DATABASE_NAME, COLLECTION_NAME, MULTIPLE_DATABASE, USE_CAPTION_FILTER
+from info import FILE_DB_URI, SEC_FILE_DB_URI, DATABASE_NAME, COLLECTION_NAME, MULTIPLE_DATABASE, USE_CAPTION_FILTER, MAX_B_TN
 
 logger = logging.getLogger(__name__)
 
-# Databases
+# First Database For File Saving
 client = MongoClient(FILE_DB_URI)
 db = client[DATABASE_NAME]
 col = db[COLLECTION_NAME]
 
+# Second Database For File Saving
 sec_client = MongoClient(SEC_FILE_DB_URI)
 sec_db = sec_client[DATABASE_NAME]
 sec_col = sec_db[COLLECTION_NAME]
 
 
 async def save_file(media):
+    """Save file in the database."""
+
     file_id, file_ref = unpack_new_file_id(media.file_id)
-    file_name = ' '.join(media.file_name.split()) if media.file_name else ''
-    caption = ' '.join(media.caption.html.split()) if media.caption and media.caption.html else ''
+    file_name = clean_file_name(media.file_name)
 
     file = {
-        '_id': file_id, 'file_ref': file_ref, 'file_name': file_name,
-        'file_size': media.file_size, 'file_type': media.file_type,
-        'mime_type': media.mime_type, 'caption': caption
+        '_id': file_id,
+        'file_ref': file_ref,
+        'file_name': file_name,
+        'file_size': media.file_size,
+        'file_type': media.file_type,
+        'mime_type': media.mime_type,
+        'caption': clean_file_name(media.caption.html) if media.caption else None,
+        'file_id': file_id
     }
+
+    if is_file_already_saved(file_id, file_name):
+        return False, 0
 
     try:
         col.insert_one(file)
+        print(f"{file_name} is successfully saved.")
+        return True, 1
     except DuplicateKeyError:
-        logger.warning(f"{file_name} is already saved.")
+        print(f"{file_name} is already saved.")
         return False, 0
     except Exception as e:
-        logger.error(f"Error saving file {file_name}: {e}")
+        logger.exception(f"Primary DB insert failed for file '{file_name}' (id={file_id}). Trying secondary DB if enabled.")
         if MULTIPLE_DATABASE:
             try:
                 sec_col.insert_one(file)
-            except Exception as e:
-                logger.error(f"Secondary DB Error saving file {file_name}: {e}")
+                print(f"{file_name} is successfully saved.")
+                return True, 1
+            except DuplicateKeyError:
+                print(f"{file_name} is already saved.")
+                return False, 0
+            except Exception:
+                logger.exception(f"Secondary DB insert failed for file '{file_name}' (id={file_id}).")
                 return False, 0
         else:
+            print("Your Current File Database Is Full, Turn On Multiple Database Feature And Add Second File Mongodb To Save File.")
             return False, 0
-    return True, 1
 
 async def save_files(files):
     """Save multiple files in the database."""
@@ -79,50 +96,235 @@ def clean_file_name(file_name):
     """Clean and format the file name."""
     if not file_name:
         return ""
-    # A basic cleaning to remove unwanted characters and spaces
-    return ' '.join(re.sub(r'[\W_]+', ' ', file_name).split())
+    file_name = re.sub(r'[\W_]+', ' ', str(file_name))
 
-def is_file_already_saved(file_id):
+    return ' '.join(filter(lambda x: not x.startswith('@') and not x.startswith('http') and not x.startswith('www.') and not x.startswith('t.me'), file_name.split()))
+
+def is_file_already_saved(file_id, file_name):
     """Check if the file is already saved in either collection."""
     found = {'_id': file_id}
-    if col.find_one(found) or sec_col.find_one(found):
-        return True
+
+    for collection in [col, sec_col]:
+        if collection.find_one(found):
+            print(f"{file_name} is already saved.")
+            return True
+
     return False
 
-async def get_search_results(query, max_results=300):
-    """
-    Performs a simple, fast initial search in the database.
-    This fetches a batch of candidate files for further processing.
-    """
-    query_parts = query.strip().split()
-    if not query_parts:
-        return [], 0
+LANGUAGES = {
+    "hindi": ["hindi", "hin"],
+    "english": ["english", "eng"],
+    "tamil": ["tamil", "tam"],
+    "telugu": ["telugu", "tel"],
+    "malayalam": ["malayalam", "mala", "mal"],
+    "kannada": ["kannada", "kan"],
+    "japanese": ["japanese", "jap"],
+    "korean": ["korean", "ko"],
+}
 
-    # Build a query that requires all parts to be present
-    # This is more efficient than a single complex regex
-    filter_clauses = [
-        {'$or': [{'file_name': re.compile(part, re.IGNORECASE)}, {'caption': re.compile(part, re.IGNORECASE)}]}
-        for part in query_parts
-    ]
-    filter_criteria = {'$and': filter_clauses} if len(filter_clauses) > 1 else filter_clauses[0]
+def get_language_regex(language):
+    if language not in LANGUAGES:
+        return None
+
+    tokens = LANGUAGES[language]
+    return r'\b(' + '|'.join(tokens) + r')\b'
+
+STOP_WORDS = ["download", "full", "hd", "send", "movie", "series"]
+
+def normalize_and_generate_regex(query_text):
+    # Clean the query by removing stop words
+    query_text = ' '.join([word for word in query_text.split() if word.lower() not in STOP_WORDS])
+
+    # --- Parse Season/Episode ---
+    se_pattern = None
+    se_match = re.search(r'\b(s|season)\s?(\d{1,2})[\s\._-]*(e|ep|episode)\s?(\d{1,3})\b', query_text, re.IGNORECASE)
+    if se_match:
+        season = int(se_match.group(2))
+        episode = int(se_match.group(4))
+        # Create a flexible regex for SXXEXX format
+        s_str, s0_str = f"{season:01d}", f"{season:02d}"
+        e_str, e0_str = f"{episode:01d}", f"{episode:02d}"
+        # This handles S01E02, S01.E02, S01 EP 02, S01EP02 etc.
+        se_pattern = f"S(0?{s_str}|{s0_str})[\\s\\._-]*?(E|EP)?[\\s\\._-]*?(0?{e_str}|{e0_str})"
+        query_text = query_text.replace(se_match.group(0), '', 1)
+
+    # --- Parse Year ---
+    year_pattern = None
+    year_match = re.search(r'\b(19|20)\d{2}\b', query_text)
+    if year_match:
+        year_pattern = year_match.group(0)
+        query_text = query_text.replace(year_match.group(0), '', 1)
+
+    # --- The rest is the title ---
+    # The remaining parts of the query are treated as title keywords
+    title_parts = query_text.strip().split()
+
+    # --- Build a simple, ordered regex ---
+    # This is much faster than lookaheads.
+    all_parts = [re.escape(part) for part in title_parts if part]
+    if year_pattern:
+        all_parts.append(year_pattern)
+    if se_pattern:
+        all_parts.append(se_pattern)
+
+    # Join all parts with '.*' to find them in order, separated by anything.
+    final_regex = '.*'.join(all_parts)
+
+    return final_regex if final_regex else ".*"
+
+
+async def get_search_candidates(query, max_results=200):
+    """
+    Get a larger, less-filtered list of candidates for further processing.
+    This query should be simpler and faster than the main search.
+    """
+    # Simple regex: match all words in any order.
+    # Using a simple regex is faster than a complex one with lookaheads.
+    # The scoring function will handle the fine-grained matching.
+    words = re.findall(r'\b\w+\b', query)
+    if not words:
+        return []
+
+    # This creates a regex that looks for all words, in any order.
+    # It's a bit more flexible than the ordered '.*'.join(words)
+    regex_pattern = ''.join([f'(?=.*{re.escape(word)})' for word in words])
 
     try:
-        total_results = col.count_documents(filter_criteria)
-        if MULTIPLE_DATABASE:
-            total_results += sec_col.count_documents(filter_criteria)
+        regex = re.compile(regex_pattern, flags=re.IGNORECASE)
+    except re.error:
+        # Fallback for invalid regex
+        regex = re.compile(re.escape(query), flags=re.IGNORECASE)
 
-        # Fetch from primary DB
-        files = list(col.find(filter_criteria).limit(max_results))
+    filter_criteria = {'$or': [{'file_name': regex}, {'caption': regex}]}
 
-        # Fetch from secondary DB if needed
+    files = []
+    try:
+        # Fetch from primary collection
+        primary_cursor = col.find(filter_criteria).limit(max_results)
+        files.extend(list(primary_cursor))
+
+        # If multiple DBs are enabled and we haven't hit the max, fetch from secondary
         if MULTIPLE_DATABASE and len(files) < max_results:
             remaining_limit = max_results - len(files)
-            files.extend(list(sec_col.find(filter_criteria).limit(remaining_limit)))
+            secondary_cursor = sec_col.find(filter_criteria).limit(remaining_limit)
+            files.extend(list(secondary_cursor))
 
-        return files, total_results
     except Exception as e:
-        logger.exception(f"Database search failed for query '{query}': {e}")
-        return [], 0
+        logger.exception(f"Candidate search failed | query='{query}' | pattern='{regex_pattern}' | error='{e}'")
+        return []
+
+    return files
+
+
+async def get_search_results(chat_id, query, file_type=None, max_results=10, offset=0, filter=False):
+    """For given query return (results, next_offset, total_results)"""
+
+    start_time = time.monotonic()
+
+    raw_pattern = normalize_and_generate_regex(query)
+
+    try:
+        regex = re.compile(raw_pattern, flags=re.IGNORECASE)
+    except re.error:
+        regex = re.escape(query)
+
+    filter_criteria = {'$or': [{'file_name': regex}, {'caption': regex}]}
+
+    # Extract language from query for filtering
+    language = None
+    query_parts = query.lower().split()
+    for part in query_parts:
+        for lang, tokens in LANGUAGES.items():
+            if part in tokens:
+                language = lang
+                break
+        if language:
+            break
+
+    if language and language != "english":
+        lang_regex = re.compile(get_language_regex(language), re.IGNORECASE)
+        filter_criteria = {
+            '$and': [
+                filter_criteria,
+                {'$or': [{'file_name': lang_regex}, {'caption': lang_regex}]}
+            ]
+        }
+    elif language == "english":
+        all_other_lang_tokens = [token for lang, tokens in LANGUAGES.items() if lang != 'english' for token in tokens]
+        other_langs_regex = re.compile(r'\b(' + '|'.join(all_other_lang_tokens) + r')\b', re.IGNORECASE)
+
+        filter_criteria = {
+            '$and': [
+                filter_criteria,
+                {
+                    '$nor': [
+                        {'file_name': other_langs_regex},
+                        {'caption': other_langs_regex}
+                    ]
+                }
+            ]
+        }
+
+    # Get total count for pagination
+    total_results = 0
+    try:
+        total_results += col.count_documents(filter_criteria)
+        if MULTIPLE_DATABASE:
+            total_results += sec_col.count_documents(filter_criteria)
+    except Exception as e:
+        logger.exception(f"Count documents failed | query='{query}' | pattern='{raw_pattern}'")
+
+    # Fetch paginated results
+    files = []
+    fetched_primary = 0
+    fetched_secondary = 0
+
+    if MULTIPLE_DATABASE:
+        try:
+            cursor1 = col.find(filter_criteria).sort('$natural', -1).skip(offset).limit(max_results)
+            for file in cursor1:
+                files.append(file)
+                fetched_primary += 1
+        except Exception as e:
+            logger.exception(f"Primary DB find failed | query='{query}' | pattern='{raw_pattern}'")
+
+        # Adjust offset and limit for the second database if needed
+        remaining_limit = max_results - fetched_primary
+        if remaining_limit > 0:
+            secondary_offset = max(0, offset - total_results) # A simple way to handle offset across DBs
+            try:
+                cursor2 = sec_col.find(filter_criteria).sort('$natural', -1).skip(secondary_offset).limit(remaining_limit)
+                for file in cursor2:
+                    files.append(file)
+                    fetched_secondary += 1
+            except Exception as e:
+                logger.exception(f"Secondary DB find failed | query='{query}' | pattern='{raw_pattern}'")
+    else:
+        try:
+            cursor = col.find(filter_criteria).sort('$natural', -1).skip(offset).limit(max_results)
+            for file in cursor:
+                files.append(file)
+                fetched_primary += 1
+        except Exception:
+            logger.exception(f"Primary DB find failed (single DB mode) | query='{query}' | pattern='{raw_pattern}'")
+
+    current_fetched = len(files)
+    next_offset = offset + current_fetched if total_results > offset + current_fetched else ""
+
+    duration_ms = int((time.monotonic() - start_time) * 1000)
+    logger.info(
+        "get_search_results stats | query='%s' | pattern='%s' | total=%s | next_offset=%s | fetched_primary=%s | fetched_secondary=%s | duration_ms=%s",
+        query,
+        raw_pattern,
+        total_results,
+        next_offset,
+        fetched_primary,
+        fetched_secondary,
+        duration_ms,
+    )
+
+    return files, next_offset, total_results
+
 
 async def get_bad_files(query, file_type=None, use_filter=False):
     """For given query return (results, next_offset)"""
@@ -157,14 +359,7 @@ async def get_bad_files(query, file_type=None, use_filter=False):
     return files, total_results
 
 async def get_file_details(query):
-    return col.find_one({'_id': query}) or sec_col.find_one({'_id': query})
-
-def unpack_new_file_id(new_file_id):
-    decoded = FileId.decode(new_file_id)
-    file_id = encode_file_id(
-        pack("<iiqq", int(decoded.file_type), decoded.dc_id, decoded.media_id, decoded.access_hash)
-    )
-    return file_id, decoded.file_reference
+    return col.find_one({'file_id': query}) or sec_col.find_one({'file_id': query})
 
 def encode_file_id(s: bytes) -> str:
     r = b""
@@ -178,3 +373,17 @@ def encode_file_id(s: bytes) -> str:
                 n = 0
             r += bytes([i])
     return base64.urlsafe_b64encode(r).decode().rstrip("=")
+
+def unpack_new_file_id(new_file_id):
+    """Return file_id, file_ref"""
+    decoded = FileId.decode(new_file_id)
+    file_id = encode_file_id(
+        pack(
+            "<iiqq",
+            int(decoded.file_type),
+            decoded.dc_id,
+            decoded.media_id,
+            decoded.access_hash
+        )
+    )
+    return file_id, decoded.file_reference

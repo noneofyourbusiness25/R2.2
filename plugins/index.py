@@ -3,7 +3,7 @@
 # Ask Doubt on telegram @KingVJ01
 
 import logging, re, asyncio
-from plugins.helpers import temp
+from utils import temp
 from info import ADMINS
 from pyrogram import Client, filters, enums
 from pyrogram.errors import FloodWait, MessageNotModified
