@@ -12,7 +12,7 @@ from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQ
 from pyrogram import Client, filters, enums
 from pyrogram.errors import FloodWait, UserIsBlocked, MessageNotModified, PeerIdInvalid
 from pyrogram.errors.exceptions.bad_request_400 import MediaEmpty, PhotoInvalidDimensions, WebpageMediaEmpty
-from utils import get_size, is_subscribed, pub_is_subscribed, get_poster, search_gagala, temp, get_settings, save_group_settings, get_shortlink, get_tutorial, send_all, get_cap
+from plugins.helpers import get_size, is_subscribed, pub_is_subscribed, get_poster, temp, get_settings, save_group_settings, get_shortlink, get_tutorial
 from database.users_chats_db import db
 from database.ia_filterdb import get_file_details, get_search_results, get_bad_files
 
@@ -33,7 +33,7 @@ async def give_filter(client, message):
     ai_search = True
     reply_msg = await message.reply_text(f"<b><i>Searching For {message.text} 🔍</i></b>")
     await auto_filter(client, message.text, message, reply_msg, ai_search)
-            
+
 @Client.on_message(filters.private & filters.text & filters.incoming)
 async def pm_text(bot, message):
     content = message.text
@@ -43,7 +43,7 @@ async def pm_text(bot, message):
     ai_search = True
     reply_msg = await bot.send_message(message.from_user.id, f"<b><i>Searching For {content} 🔍</i></b>", reply_to_message_id=message.id)
     await auto_filter(bot, content, message, reply_msg, ai_search)
-    
+
 @Client.on_callback_query(filters.regex(r"^next"))
 async def next_page(bot, query):
     ident, req, key, offset = query.data.split("_")
@@ -80,7 +80,7 @@ async def next_page(bot, query):
         for filevj in files
     ]
 
-    btn.insert(0, 
+    btn.insert(0,
         [
             InlineKeyboardButton(f'ǫᴜᴀʟɪᴛʏ', callback_data=f"qualities#{key}"),
             InlineKeyboardButton("ᴇᴘɪsᴏᴅᴇs", callback_data=f"episodes#{key}"),
@@ -147,7 +147,7 @@ async def advantage_spoll_choker(bot, query):
         await asyncio.sleep(10)
         await k.delete()
 
-# Year 
+# Year
 @Client.on_callback_query(filters.regex(r"^years#"))
 async def years_cb_handler(client: Client, query: CallbackQuery):
 
@@ -188,7 +188,7 @@ async def years_cb_handler(client: Client, query: CallbackQuery):
     btn.append([InlineKeyboardButton(text="↭ ʙᴀᴄᴋ ᴛᴏ ꜰɪʟᴇs ↭", callback_data=f"fy#homepage#{key}")])
 
     await query.edit_message_reply_markup(InlineKeyboardMarkup(btn))
-    
+
 
 @Client.on_callback_query(filters.regex(r"^fy#"))
 async def filter_yearss_cb_handler(client: Client, query: CallbackQuery):
@@ -213,7 +213,7 @@ async def filter_yearss_cb_handler(client: Client, query: CallbackQuery):
     except:
         pass
     if lang != "homepage":
-        search = f"{search} {lang}" 
+        search = f"{search} {lang}"
     BUTTONS[key] = search
 
     files, offset, total_results = await get_search_results(chat_id, search, offset=0, filter=True)
@@ -229,7 +229,7 @@ async def filter_yearss_cb_handler(client: Client, query: CallbackQuery):
         ]
         for filevj in files
     ]
-    btn.insert(0, 
+    btn.insert(0,
         [
             InlineKeyboardButton(f'ǫᴜᴀʟɪᴛʏ', callback_data=f"qualities#{key}"),
             InlineKeyboardButton("ᴇᴘɪsᴏᴅᴇs", callback_data=f"episodes#{key}"),
@@ -249,14 +249,14 @@ async def filter_yearss_cb_handler(client: Client, query: CallbackQuery):
         btn.append(
             [InlineKeyboardButton(text="𝐍𝐎 𝐌𝐎𝐑𝐄 𝐏𝐀𝐆𝐄𝐒 𝐀𝐕𝐀𝐈𝐋𝐀𝐁𝐋𝐄",callback_data="pages")]
         )
-    
+
     try:
         await query.edit_message_reply_markup(
             reply_markup=InlineKeyboardMarkup(btn)
         )
     except MessageNotModified:
         pass
-    await query.answer()  
+    await query.answer()
 
 # Episode
 
@@ -300,7 +300,7 @@ async def episodes_cb_handler(client: Client, query: CallbackQuery):
     btn.append([InlineKeyboardButton(text="↭ ʙᴀᴄᴋ ᴛᴏ ꜰɪʟᴇs ↭", callback_data=f"fe#homepage#{key}")])
 
     await query.edit_message_reply_markup(InlineKeyboardMarkup(btn))
-    
+
 
 @Client.on_callback_query(filters.regex(r"^fe#"))
 async def filter_episodes_cb_handler(client: Client, query: CallbackQuery):
@@ -325,7 +325,7 @@ async def filter_episodes_cb_handler(client: Client, query: CallbackQuery):
     except:
         pass
     if lang != "homepage":
-        search = f"{search} {lang}" 
+        search = f"{search} {lang}"
     BUTTONS[key] = search
 
     files, offset, total_results = await get_search_results(chat_id, search, offset=0, filter=True)
@@ -341,7 +341,7 @@ async def filter_episodes_cb_handler(client: Client, query: CallbackQuery):
         ]
         for filevj in files
     ]
-    btn.insert(0, 
+    btn.insert(0,
         [
             InlineKeyboardButton(f'ǫᴜᴀʟɪᴛʏ', callback_data=f"qualities#{key}"),
             InlineKeyboardButton("ᴇᴘɪsᴏᴅᴇs", callback_data=f"episodes#{key}"),
@@ -361,7 +361,7 @@ async def filter_episodes_cb_handler(client: Client, query: CallbackQuery):
         btn.append(
             [InlineKeyboardButton(text="𝐍𝐎 𝐌𝐎𝐑𝐄 𝐏𝐀𝐆𝐄𝐒 𝐀𝐕𝐀𝐈𝐋𝐀𝐁𝐋𝐄",callback_data="pages")]
         )
-    
+
     try:
         await query.edit_message_reply_markup(
             reply_markup=InlineKeyboardMarkup(btn)
@@ -369,7 +369,7 @@ async def filter_episodes_cb_handler(client: Client, query: CallbackQuery):
     except MessageNotModified:
         pass
     await query.answer()
-    
+
 
 
 #languages
@@ -414,7 +414,7 @@ async def languages_cb_handler(client: Client, query: CallbackQuery):
     btn.append([InlineKeyboardButton(text="↭ ʙᴀᴄᴋ ᴛᴏ ꜰɪʟᴇs ​↭", callback_data=f"fl#homepage#{key}")])
 
     await query.edit_message_reply_markup(InlineKeyboardMarkup(btn))
-    
+
 
 @Client.on_callback_query(filters.regex(r"^fl#"))
 async def filter_languages_cb_handler(client: Client, query: CallbackQuery):
@@ -439,7 +439,7 @@ async def filter_languages_cb_handler(client: Client, query: CallbackQuery):
     except:
         pass
     if lang != "homepage":
-        search = f"{search} {lang}" 
+        search = f"{search} {lang}"
     BUTTONS[key] = search
 
     files, offset, total_results = await get_search_results(chat_id, search, offset=0, filter=True)
@@ -455,7 +455,7 @@ async def filter_languages_cb_handler(client: Client, query: CallbackQuery):
         ]
         for filevj in files
     ]
-    btn.insert(0, 
+    btn.insert(0,
         [
             InlineKeyboardButton(f'ǫᴜᴀʟɪᴛʏ', callback_data=f"qualities#{key}"),
             InlineKeyboardButton("ᴇᴘɪsᴏᴅᴇs", callback_data=f"episodes#{key}"),
@@ -475,15 +475,15 @@ async def filter_languages_cb_handler(client: Client, query: CallbackQuery):
         btn.append(
             [InlineKeyboardButton(text="𝐍𝐎 𝐌𝐎𝐑𝐄 𝐏𝐀𝐆𝐄𝐒 𝐀𝐕𝐀𝐈𝐋𝐀𝐁𝐋𝐄",callback_data="pages")]
         )
-    
+
     try:
         await query.edit_message_reply_markup(
             reply_markup=InlineKeyboardMarkup(btn)
         )
     except MessageNotModified:
         pass
-    await query.answer()    
-    
+    await query.answer()
+
 @Client.on_callback_query(filters.regex(r"^seasons#"))
 async def seasons_cb_handler(client: Client, query: CallbackQuery):
 
@@ -495,7 +495,7 @@ async def seasons_cb_handler(client: Client, query: CallbackQuery):
             )
     except:
         pass
-    
+
     _, key = query.data.split("#")
     search = FRESH.get(key)
     BUTTONS[key] = None
@@ -544,7 +544,7 @@ async def filter_seasons_cb_handler(client: Client, query: CallbackQuery):
         search = search.replace(sea, "")
     else:
         search = search
-    
+
     req = query.from_user.id
     chat_id = query.message.chat.id
     message = query.message
@@ -556,25 +556,25 @@ async def filter_seasons_cb_handler(client: Client, query: CallbackQuery):
             )
     except:
         pass
-    
+
     searchagn = search
     search1 = search
     search2 = search
     search = f"{search} {seas}"
     BUTTONS0[key] = search
-    
+
     files, _, _ = await get_search_results(chat_id, search, max_results=10)
     files = [file for file in files if re.search(seas, file["file_name"], re.IGNORECASE)]
-    
+
     seas1 = "s01" if seas == "season 1" else "s02" if seas == "season 2" else "s03" if seas == "season 3" else "s04" if seas == "season 4" else "s05" if seas == "season 5" else "s06" if seas == "season 6" else "s07" if seas == "season 7" else "s08" if seas == "season 8" else "s09" if seas == "season 9" else "s10" if seas == "season 10" else ""
     search1 = f"{search1} {seas1}"
     BUTTONS1[key] = search1
     files1, _, _ = await get_search_results(chat_id, search1, max_results=10)
     files1 = [file for file in files1 if re.search(seas1, file["file_name"], re.IGNORECASE)]
-    
+
     if files1:
         files.extend(files1)
-    
+
     seas2 = "season 01" if seas == "season 1" else "season 02" if seas == "season 2" else "season 03" if seas == "season 3" else "season 04" if seas == "season 4" else "season 05" if seas == "season 5" else "season 06" if seas == "season 6" else "season 07" if seas == "season 7" else "season 08" if seas == "season 8" else "season 09" if seas == "season 9" else "s010"
     search2 = f"{search2} {seas2}"
     BUTTONS2[key] = search2
@@ -583,7 +583,7 @@ async def filter_seasons_cb_handler(client: Client, query: CallbackQuery):
 
     if files2:
         files.extend(files2)
-        
+
     if not files:
         await query.answer("🚫 𝗡𝗼 𝗙𝗶𝗹𝗲 𝗪𝗲𝗿𝗲 𝗙𝗼𝘂𝗻𝗱 🚫", show_alert=1)
         return
@@ -596,7 +596,7 @@ async def filter_seasons_cb_handler(client: Client, query: CallbackQuery):
         ]
         for filevj in files
     ]
-    btn.insert(0, 
+    btn.insert(0,
         [
             InlineKeyboardButton(f'ǫᴜᴀʟɪᴛʏ', callback_data=f"qualities#{key}"),
             InlineKeyboardButton("ᴇᴘɪsᴏᴅᴇs", callback_data=f"episodes#{key}"),
@@ -607,7 +607,7 @@ async def filter_seasons_cb_handler(client: Client, query: CallbackQuery):
         InlineKeyboardButton("𝐒𝐞𝐧𝐝 𝐀𝐥𝐥", callback_data=f"sendfiles#{key}"),
         InlineKeyboardButton("ʟᴀɴɢᴜᴀɢᴇs", callback_data=f"languages#{key}"),
         InlineKeyboardButton("ʏᴇᴀʀs", callback_data=f"years#{key}")
-    ])   
+    ])
     offset = 0
 
     btn.append([
@@ -616,7 +616,7 @@ async def filter_seasons_cb_handler(client: Client, query: CallbackQuery):
                 callback_data=f"next_{req}_{key}_{offset}"
                 ),
     ])
-    
+
     try:
         await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(btn))
     except MessageNotModified:
@@ -663,7 +663,7 @@ async def qualities_cb_handler(client: Client, query: CallbackQuery):
     btn.append([InlineKeyboardButton(text="↭ ʙᴀᴄᴋ ᴛᴏ ꜰɪʟᴇs ↭", callback_data=f"fl#homepage#{key}")])
 
     await query.edit_message_reply_markup(InlineKeyboardMarkup(btn))
-    
+
 
 @Client.on_callback_query(filters.regex(r"^fl#"))
 async def filter_qualities_cb_handler(client: Client, query: CallbackQuery):
@@ -688,7 +688,7 @@ async def filter_qualities_cb_handler(client: Client, query: CallbackQuery):
         pass
     searchagain = search
     if lang != "homepage":
-        search = f"{search} {qual}" 
+        search = f"{search} {qual}"
     BUTTONS[key] = search
 
     files, offset, total_results = await get_search_results(chat_id, search, offset=0, filter=True)
@@ -703,8 +703,8 @@ async def filter_qualities_cb_handler(client: Client, query: CallbackQuery):
             ),
         ]
         for filevj in files
-    ] 
-    btn.insert(0, 
+    ]
+    btn.insert(0,
         [
             InlineKeyboardButton(f'ǫᴜᴀʟɪᴛʏ', callback_data=f"qualities#{key}"),
             InlineKeyboardButton("ᴇᴘɪsᴏᴅᴇs", callback_data=f"episodes#{key}"),
@@ -733,7 +733,7 @@ async def filter_qualities_cb_handler(client: Client, query: CallbackQuery):
         pass
     await query.answer()
 
-                
+
 @Client.on_callback_query()
 async def cb_handler(client: Client, query: CallbackQuery):
     me = await client.get_me()
@@ -770,7 +770,7 @@ async def cb_handler(client: Client, query: CallbackQuery):
             InlineKeyboardButton("🏡 ʜᴏᴍᴇ", callback_data="start")
         ]]
         await query.message.edit_text(text = script.CLONE_ABOUT_TXT.format(me.mention, temp.U_NAME, temp.B_NAME), reply_markup = InlineKeyboardMarkup(btn))
-        
+
     if query.data.startswith("file"):
         clicked = query.from_user.id
         try:
@@ -808,7 +808,7 @@ async def cb_handler(client: Client, query: CallbackQuery):
             await query.answer(url=f"https://telegram.me/{me.username}?start={ident}_{file_id}")
         except Exception as e:
             await query.answer(url=f"https://telegram.me/{me.username}?start={ident}_{file_id}")
-            
+
     elif query.data.startswith("sendfiles"):
         clicked = query.from_user.id
         ident, key = query.data.split("#")
@@ -816,8 +816,8 @@ async def cb_handler(client: Client, query: CallbackQuery):
             if settings['url']:
                 await query.answer(url=f"https://telegram.me/{me.username}?start=sendfiles1_{key}")
             else:
-                await query.answer(url=f"https://telegram.me/{me.username}?start=allfiles_{key}")    
-                
+                await query.answer(url=f"https://telegram.me/{me.username}?start=allfiles_{key}")
+
         except UserIsBlocked:
             await query.answer('Uɴʙʟᴏᴄᴋ ᴛʜᴇ ʙᴏᴛ ᴍᴀʜɴ !', show_alert=True)
         except PeerIdInvalid:
@@ -825,10 +825,10 @@ async def cb_handler(client: Client, query: CallbackQuery):
         except Exception as e:
             logger.exception(e)
             await query.answer(url=f"https://telegram.me/{me.username}?start=sendfiles4_{key}")
-    
+
     elif query.data.startswith("send_fsall"):
         temp_var, ident, key, offset = query.data.split("#")
-        search = BUTTON0.get(key)
+        search = BUTTONS0.get(key)
         if not search:
             await query.answer(script.OLD_ALRT_TXT.format(query.from_user.first_name),show_alert=True)
             return
@@ -841,7 +841,7 @@ async def cb_handler(client: Client, query: CallbackQuery):
         files, n_offset, total = await get_search_results(query.message.chat.id, search, offset=int(offset), filter=True)
         await send_all(client, query.from_user.id, files, ident, query.message.chat.id, query.from_user.first_name, query)
         await query.answer(f"Hey {query.from_user.first_name}, All files on this page has been sent successfully to your PM !", show_alert=True)
-        
+
     elif query.data.startswith("send_fall"):
         temp_var, ident, key, offset = query.data.split("#")
         search = FRESH.get(key)
@@ -898,7 +898,7 @@ async def auto_filter(client, name, msg, reply_msg, ai_search, spoll=False):
         ]
         for filevj in files
     ]
-    btn.insert(0, 
+    btn.insert(0,
         [
             InlineKeyboardButton(f'ǫᴜᴀʟɪᴛʏ', callback_data=f"qualities#{key}"),
             InlineKeyboardButton("ᴇᴘɪsᴏᴅᴇs", callback_data=f"episodes#{key}"),
@@ -968,14 +968,14 @@ async def auto_filter(client, name, msg, reply_msg, ai_search, spoll=False):
             await message.delete()
         except (MediaEmpty, PhotoInvalidDimensions, WebpageMediaEmpty):
             pic = imdb.get('poster')
-            poster = pic.replace('.jpg', "._V1_UX360.jpg") 
+            poster = pic.replace('.jpg', "._V1_UX360.jpg")
             hmm = await message.reply_photo(photo=poster, caption=cap, reply_markup=InlineKeyboardMarkup(btn))
             await reply_msg.delete()
             await asyncio.sleep(300)
             await hmm.delete()
             await message.delete()
         except Exception as e:
-            logger.exception(e) 
+            logger.exception(e)
             fek = await reply_msg.edit_text(text=cap, reply_markup=InlineKeyboardMarkup(btn))
             await asyncio.sleep(300)
             await fek.delete()
