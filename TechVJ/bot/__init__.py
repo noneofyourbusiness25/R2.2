@@ -24,7 +24,7 @@ class TechVJXBot(Client):
 
     async def set_self(self):
         temp.BOT = self
-    
+
     async def iter_messages(
         self,
         chat_id: Union[int, str],
@@ -40,10 +40,10 @@ class TechVJXBot(Client):
                 Unique identifier (int) or username (str) of the target chat.
                 For your personal cloud (Saved Messages) you can simply use "me" or "self".
                 For a contact that exists in your Telegram address book you can use his phone number (str).
-                
+
             limit (``int``):
                 Identifier of the last message to be returned.
-                
+
             offset (``int``, *optional*):
                 Identifier of the first message to be returned.
                 Defaults to 0.
@@ -63,7 +63,7 @@ class TechVJXBot(Client):
             for message in messages:
                 yield message
                 current += 1
-      
+
 TechVJBot = TechVJXBot()
 
 multi_clients = {}

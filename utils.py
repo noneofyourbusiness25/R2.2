@@ -2,7 +2,7 @@
 # Subscribe YouTube Channel For Amazing Bot @Tech_VJ
 # Ask Doubt on telegram @KingVJ01
 
-import logging, asyncio, os, re, random, pytz, aiohttp, requests, string, json, http.client
+import logging, asyncio, os, re, random, pytz, aiohttp, requests, string, json, http.client, unicodedata
 from info import *
 from imdb import Cinemagoer
 from pyrogram.types import Message, InlineKeyboardButton, InlineKeyboardMarkup
@@ -16,7 +16,7 @@ from database.users_chats_db import db
 from database.join_reqs import JoinReqs
 from bs4 import BeautifulSoup
 from shortzy import Shortzy
-from database.ia_filterdb import LANGUAGES
+from info import LANGUAGES
 
 
 def extract_year(text):
@@ -860,3 +860,125 @@ async def get_seconds(time_string):
         return value * 86400 * 365
     else:
         return 0
+
+# --- Search V2 ---
+
+NOISE_TOKENS = [
+    '720p', '1080p', '1440p', '2160p', '4k', '5k', '8k', '3d',
+    'web-dl', 'webdl', 'webrip', 'web-rip', 'bluray', 'blu-ray', 'bdrip',
+    'x264', 'x265', 'h264', 'h265', 'hevc', '10bit',
+    'truehd', 'atmos', 'ddp', 'ddp5', 'ddp7',
+    'hdrip', 'remux', 'proper', 'internal', 'multi', 'sub',
+    'download', 'movie', 'series', 'tv'
+]
+
+SE_REGEX_PATTERNS = [
+    re.compile(r'(?i)\bS(?:eason)?[ ._\-]?0*(\d{1,2})[ ._\-]?[Ee](?:P|p|pisode)?[ ._\-]?0*(\d{1,3})\b'),
+    re.compile(r'(?i)\bSeason[ ._\-]?0*(\d{1,2})[ ._\-]?Episode[ ._\-]?0*(\d{1,3})\b'),
+    re.compile(r'(?i)\b0*(\d{1,2})x0*(\d{1,3})\b'),
+    re.compile(r'(?i)\bEP(?:isode)?[ ._\-]?0*(\d{1,3})\b'),
+    re.compile(r'(?i)\bE[ ._\-]?0*(\d{1,3})\b')
+]
+
+def normalize_text(text):
+    if not text: return ""
+    text = text.lower()
+    text = ''.join(c for c in unicodedata.normalize('NFD', text) if unicodedata.category(c) != 'Mn')
+    text = re.sub(r'[\.\_\-\(\)\[\]]+', ' ', text)
+    text = re.sub(r'[^\w\s]', ' ', text)
+    text = re.sub(r'\s+', ' ', text).strip()
+    return text
+
+def get_title_tokens(text, normalized_text):
+    tokens = normalized_text.split()
+    tokens = [t for t in tokens if t not in NOISE_TOKENS and t.lower() not in ALL_LANG_TOKENS]
+    # Further clean up season/episode patterns from title
+    for pattern in SE_REGEX_PATTERNS:
+        text = pattern.sub('', text)
+    return text.split()
+
+def extract_metadata(file_data):
+    filename = file_data.get('file_name', '')
+    caption = file_data.get('caption', '')
+    full_text_raw = f"{filename} {caption if caption else ''}"
+    normalized_text = normalize_text(full_text_raw)
+
+    meta = {
+        'season': None, 'episode': None, 'language': None, 'year': None,
+        'title_tokens': [], 'raw_title': filename.rsplit('.', 1)[0]
+    }
+
+    text_to_parse = normalized_text
+
+    for pattern in SE_REGEX_PATTERNS:
+        match = pattern.search(text_to_parse)
+        if match:
+            groups = match.groups()
+            if len(groups) == 2:
+                meta['season'], meta['episode'] = int(groups[0]), int(groups[1])
+            elif len(groups) == 1:
+                meta['episode'] = int(groups[0])
+            text_to_parse = pattern.sub(' ', text_to_parse).strip()
+            if meta.get('season') and meta.get('episode'):
+                break
+
+    lang_match = LANGUAGE_REGEX.search(text_to_parse)
+    if lang_match:
+        found_token = lang_match.group(1).lower()
+        for lang, tokens in LANGUAGE_MAP.items():
+            if found_token in tokens:
+                meta['language'] = lang
+                break
+        if meta['language']:
+            text_to_parse = LANGUAGE_REGEX.sub(' ', text_to_parse).strip()
+
+    year_match = re.search(r'\b((?:19|20)\d{2})\b', text_to_parse)
+    if year_match:
+        meta['year'] = int(year_match.group(1))
+        text_to_parse = text_to_parse.replace(year_match.group(1), ' ', 1).strip()
+
+    meta['title_tokens'] = get_title_tokens(text_to_parse, normalized_text)
+    return meta
+
+def compute_score(query_meta, file_meta):
+    w = {'title': 0.40, 'season': 0.18, 'episode': 0.18, 'language': 0.12, 'caption': 0.06, 'exact_order': 0.06}
+    score = 0.0
+
+    query_title_tokens = set(query_meta['title_tokens'])
+    file_title_tokens = set(file_meta['title_tokens'])
+
+    if query_title_tokens:
+        intersection = len(query_title_tokens.intersection(file_title_tokens))
+        union = len(query_title_tokens.union(file_title_tokens))
+        title_score = intersection / union if union > 0 else 0
+
+        # Title Sparseness Penalty
+        extra_words = len(file_title_tokens - query_title_tokens)
+        title_score -= (extra_words * 0.05) # Penalize 0.05 for each extra word
+
+        score += w['title'] * max(0, title_score)
+
+    if query_meta.get('season'):
+        score += w['season'] if query_meta['season'] == file_meta['season'] else -0.5
+    if query_meta.get('episode'):
+        score += w['episode'] if query_meta['episode'] == file_meta['episode'] else 0
+    if query_meta.get('language'):
+        if query_meta['language'] == file_meta['language']:
+            score += w['language']
+        elif file_meta['language'] is not None: # Conflict
+            score -= 0.5
+
+    return max(0, score)
+
+async def get_search_results(files, query):
+    query_meta = extract_metadata({'file_name': query})
+
+    processed_files = []
+    for file in files:
+        file_meta = extract_metadata(file)
+        score = compute_score(query_meta, file_meta)
+
+        if score >= 0.35:
+            processed_files.append({'file': file, 'meta': file_meta, 'score': score})
+
+    return sorted(processed_files, key=lambda x: x['score'], reverse=True)
