@@ -184,13 +184,10 @@ async def get_search_candidates(query, max_results=200):
 
     regex_pattern = '.*'.join([re.escape(word) for word in words])
 
-    try:
-        regex = re.compile(regex_pattern, flags=re.IGNORECASE)
-    except re.error:
-        # Fallback for invalid regex
-        regex = re.compile(re.escape(query), flags=re.IGNORECASE)
-
-    filter_criteria = {'$or': [{'file_name': regex}, {'caption': regex}]}
+    filter_criteria = {'$or': [
+        {'file_name': {'$regex': regex_pattern, '$options': 'i'}},
+        {'caption': {'$regex': regex_pattern, '$options': 'i'}}
+    ]}
 
     files = []
     try:
