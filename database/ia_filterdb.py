@@ -96,11 +96,7 @@ def clean_file_name(file_name):
     """Clean and format the file name."""
     if not file_name:
         return ""
-    file_name = re.sub(r"(_|\-|\.|\+)", " ", str(file_name))
-    unwanted_chars = ['[', ']', '(', ')', '{', '}']
-
-    for char in unwanted_chars:
-        file_name = file_name.replace(char, '')
+    file_name = re.sub(r'[\W_]+', ' ', str(file_name))
 
     return ' '.join(filter(lambda x: not x.startswith('@') and not x.startswith('http') and not x.startswith('www.') and not x.startswith('t.me'), file_name.split()))
 
@@ -120,7 +116,8 @@ LANGUAGES = {
     "english": ["english", "eng"],
     "tamil": ["tamil", "tam"],
     "telugu": ["telugu", "tel"],
-    "malayalam": ["malayalam", "mala"],
+    "malayalam": ["malayalam", "mala", "mal"],
+    "kannada": ["kannada", "kan"],
     "japanese": ["japanese", "jap"],
     "korean": ["korean", "ko"],
 }
@@ -132,106 +129,131 @@ def get_language_regex(language):
     tokens = LANGUAGES[language]
     return r'\b(' + '|'.join(tokens) + r')\b'
 
+def build_filter_query(state):
+    query_text = state.get('query', '')
+    filters = state.get('filters', {})
+    filter_clauses = []
+
+    # --- Title Filter ---
+    # Each word in the query must be present in the name or caption
+    title_parts = [re.escape(part) for part in query_text.split() if part]
+    if title_parts:
+        for part in title_parts:
+            regex = re.compile(part, flags=re.IGNORECASE)
+            filter_clauses.append({'$or': [{'file_name': regex}, {'caption': regex}]})
+
+    # --- Season/Episode Filter ---
+    season = filters.get('s')
+    episode = filters.get('e')
+    if season and episode:
+        # Strict SXXEXX search
+        s_str, s0_str = f"{season:01d}", f"{season:02d}"
+        e_str, e0_str = f"{episode:01d}", f"{episode:02d}"
+        se_pattern = f"S(0?{s_str}|{s0_str})[\\s\\._-]*?(E|EP)?[\\s\\._-]*?(0?{e_str}|{e0_str})"
+        se_regex = re.compile(se_pattern, re.IGNORECASE)
+        filter_clauses.append({'$or': [{'file_name': se_regex}, {'caption': se_regex}]})
+    elif season:
+        # Search for season only, e.g., "S01" or "Season 01"
+        season_pattern = r'\b(s|season)\s?(0?' + str(season) + r'|' + f"{season:02d}" + r')\b'
+        season_regex = re.compile(season_pattern, re.IGNORECASE)
+        filter_clauses.append({'$or': [{'file_name': season_regex}, {'caption': season_regex}]})
+
+    # --- Year Filter ---
+    year = filters.get('year')
+    if year:
+        year_regex = re.compile(str(year))
+        filter_clauses.append({'$or': [{'file_name': year_regex}, {'caption': year_regex}]})
+
+    # --- Language Filter ---
+    language = filters.get('lang')
+    if language and language != "english":
+        lang_regex_str = get_language_regex(language)
+        if lang_regex_str:
+            lang_regex = re.compile(lang_regex_str, re.IGNORECASE)
+            filter_clauses.append({'$or': [{'file_name': lang_regex}, {'caption': lang_regex}]})
+    elif language == "english":
+        all_other_lang_tokens = [token for lang, tokens in LANGUAGES.items() if lang != 'english' for token in tokens]
+        other_langs_regex = re.compile(r'\b(' + '|'.join(all_other_lang_tokens) + r')\b', re.IGNORECASE)
+        filter_clauses.append({
+            '$nor': [
+                {'file_name': other_langs_regex},
+                {'caption': other_langs_regex}
+            ]
+        })
+
+    if not filter_clauses:
+        return {} # Match all documents if no criteria is provided
+
+    # Combine all clauses with $and
+    return {'$and': filter_clauses} if len(filter_clauses) > 1 else filter_clauses[0]
+
 async def get_search_results(chat_id, query, file_type=None, max_results=10, offset=0, filter=False):
-    """For given query return (results, next_offset)"""
+    """For given query return (results, next_offset, total_results)"""
 
     start_time = time.monotonic()
 
-    query = query.strip()
-
-    # Parse query
-    name = ""
-    year = None
-    season = None
-    episode = None
-    language = None
-
-    parts = query.split()
-    for part in parts:
-        if part.isdigit() and len(part) == 4:
-            year = part
-        elif part.lower() in [lang for sublist in LANGUAGES.values() for lang in sublist]:
-            for lang, tokens in LANGUAGES.items():
-                if part.lower() in tokens:
-                    language = lang
-                    break
-        elif re.match(r"s(\d{1,2})e(\d{1,3})", part.lower()):
-            match = re.match(r"s(\d{1,2})e(\d{1,3})", part.lower())
-            season = int(match.group(1))
-            episode = int(match.group(2))
-        else:
-            name += part + " "
-
-    name = name.strip()
-
-    # Build regex
-    if not name:
-        raw_pattern = '.'
-    elif ' ' not in name:
-        raw_pattern = r'(\b|[\.\+\-_])' + re.escape(name) + r'(\b|[\.\+\-_])'
+    if isinstance(query, str):
+        # Handle old format or calls from other parts of the code for compatibility
+        state = {'query': query, 'filters': {}}
     else:
-        raw_pattern = re.escape(name).replace(' ', r'.*[\s\.\+\-_]')
+        state = query
 
-    if year:
-        raw_pattern += r'.*' + re.escape(year)
+    # Use the new, robust query builder
+    filter_criteria = build_filter_query(state)
 
-    if season and episode:
-        season_str = f"{season:02d}"
-        episode_str = f"{episode:02d}"
-        raw_pattern += r'.*s' + season_str + r'.*e' + episode_str
+    # For logging purposes, create a representative string
+    query_log_string = json.dumps(state)
+    raw_pattern = query_log_string # Use the json string for the pattern log
 
-    if language:
-        lang_regex = get_language_regex(language)
-        if lang_regex:
-            raw_pattern += r'.*' + lang_regex
-            if language == "english":
-                # Also match files with no language
-                all_lang_tokens = [token for sublist in LANGUAGES.values() for token in sublist]
-                no_lang_regex = r'^(?!.*(' + '|'.join(all_lang_tokens) + r'))'
-                raw_pattern = f"({raw_pattern}|{no_lang_regex}.*)"
-
+    # Get total count for pagination
+    total_results = 0
     try:
-        regex = re.compile(raw_pattern, flags=re.IGNORECASE)
-    except re.error:
-        regex = re.escape(query)
+        total_results += col.count_documents(filter_criteria)
+        if MULTIPLE_DATABASE:
+            total_results += sec_col.count_documents(filter_criteria)
+    except Exception as e:
+        logger.exception(f"Count documents failed | query='{query_log_string}'")
 
-    filter_criteria = {'$or': [{'file_name': regex}, {'caption': regex}]}
-
+    # Fetch paginated results
     files = []
     fetched_primary = 0
     fetched_secondary = 0
 
     if MULTIPLE_DATABASE:
         try:
+            # Primary DB query
+            primary_count = col.count_documents(filter_criteria)
             cursor1 = col.find(filter_criteria).sort('$natural', -1).skip(offset).limit(max_results)
             for file in cursor1:
                 files.append(file)
                 fetched_primary += 1
+
+            # Secondary DB query if needed
+            remaining_limit = max_results - fetched_primary
+            if remaining_limit > 0:
+                secondary_offset = max(0, offset - primary_count)
+                cursor2 = sec_col.find(filter_criteria).sort('$natural', -1).skip(secondary_offset).limit(remaining_limit)
+                for file in cursor2:
+                    files.append(file)
+                    fetched_secondary += 1
         except Exception as e:
-            logger.exception(f"Primary DB find failed | query='{query}' | pattern='{raw_pattern}'")
-        try:
-            cursor2 = sec_col.find(filter_criteria).sort('$natural', -1).skip(offset).limit(max_results)
-            for file in cursor2:
-                files.append(file)
-                fetched_secondary += 1
-        except Exception as e:
-            logger.exception(f"Secondary DB find failed | query='{query}' | pattern='{raw_pattern}'")
+            logger.exception(f"DB find failed | query='{query_log_string}'")
     else:
         try:
             cursor = col.find(filter_criteria).sort('$natural', -1).skip(offset).limit(max_results)
             for file in cursor:
                 files.append(file)
                 fetched_primary += 1
-        except Exception:
-            logger.exception(f"Primary DB find failed (single DB mode) | query='{query}' | pattern='{raw_pattern}'")
+        except Exception as e:
+            logger.exception(f"Primary DB find failed (single DB mode) | query='{query_log_string}'")
 
-    total_results = len(files)
-    next_offset = "" if len(files) < max_results else (offset + max_results)
+    current_fetched = len(files)
+    next_offset = offset + current_fetched if total_results > offset + current_fetched else ""
 
     duration_ms = int((time.monotonic() - start_time) * 1000)
     logger.info(
         "get_search_results stats | query='%s' | pattern='%s' | total=%s | next_offset=%s | fetched_primary=%s | fetched_secondary=%s | duration_ms=%s",
-        query,
+        query_log_string,
         raw_pattern,
         total_results,
         next_offset,

@@ -16,6 +16,146 @@ from database.users_chats_db import db
 from database.join_reqs import JoinReqs
 from bs4 import BeautifulSoup
 from shortzy import Shortzy
+from database.ia_filterdb import LANGUAGES
+
+
+def extract_year(text):
+    match = re.search(r'\b(19|20)\d{2}\b', text)
+    if match:
+        return match.group(0)
+    return None
+
+def extract_season_episode(text):
+    match = re.search(r'\b(s|season)\s?(\d{1,2})[\s\._-]*?(e|ep|episode)\s?(\d{1,3})\b', text, re.IGNORECASE)
+    if match:
+        season = int(match.group(2))
+        episode = int(match.group(4))
+        return f"Season {season} Episode {episode}", match.group(0)
+    return None, None
+
+def extract_quality(text):
+    match = re.search(r'\b(360p|480p|720p|1080p|2160p)\b', text, re.IGNORECASE)
+    if match:
+        return match.group(0)
+    return None
+
+def extract_duration(text):
+    match = re.search(r'\b(\d{1,2}:\d{2}:\d{2}|\d{1,2}:\d{2})\b', text)
+    if match:
+        return match.group(0)
+    return None
+
+def extract_languages(text):
+    found_languages = set()
+    for lang, tokens in LANGUAGES.items():
+        for token in tokens:
+            if re.search(r'\b' + re.escape(token) + r'\b', text, re.IGNORECASE):
+                found_languages.add(lang.title())
+    return sorted(list(found_languages)) if found_languages else None
+
+def extract_subtitles(text):
+    match = re.search(r'\b(esub|esubs|subtitles)\b', text, re.IGNORECASE)
+    return "ESUB" if match else None
+
+def remove_parts(text, parts):
+    for part in parts:
+        if part:
+            # Use regex to remove the part as a whole word to avoid partial replacements
+            text = re.sub(r'\b' + re.escape(part) + r'\b', '', text, flags=re.IGNORECASE)
+    return text
+
+def parse_info(filename, caption):
+    # Combine filename and caption for comprehensive parsing
+    text_to_parse = filename
+    if caption:
+        text_to_parse += " " + caption
+
+    # Keep track of parts to remove from title
+    parts_to_remove = []
+
+    # --- Extract all details ---
+    year = extract_year(text_to_parse)
+    if year:
+        parts_to_remove.append(year)
+
+    season_episode, se_raw = extract_season_episode(text_to_parse)
+    if se_raw:
+        parts_to_remove.append(se_raw)
+
+    quality = extract_quality(text_to_parse)
+    if quality:
+        parts_to_remove.append(quality)
+
+    duration = extract_duration(text_to_parse)
+    if duration:
+        parts_to_remove.append(duration)
+
+    languages = extract_languages(text_to_parse)
+    if languages:
+        # Also add language tokens to parts_to_remove
+        for lang in languages:
+            for token in LANGUAGES.get(lang.lower(), []):
+                parts_to_remove.append(token)
+
+    subtitles = extract_subtitles(text_to_parse)
+    if subtitles:
+        parts_to_remove.append("esub")
+        parts_to_remove.append("esubs")
+        parts_to_remove.append("subtitles")
+
+
+    # --- Determine Title ---
+    # Start with the raw filename (without extension)
+    title = filename.rsplit('.', 1)[0]
+
+    # Remove all the parts we found
+    title = remove_parts(title, parts_to_remove)
+
+    # Clean up the title
+    title = re.sub(r'[\W_]+', ' ', title) # Replace non-alphanumeric with space
+    title = ' '.join(title.split()) # Normalize spaces
+    title = title.strip()
+
+    return {
+        "title": title,
+        "year": year,
+        "season_episode": season_episode,
+        "quality": quality,
+        "duration": duration,
+        "languages": languages,
+        "subtitles": subtitles
+    }
+
+def format_caption(data):
+    caption_parts = []
+
+    title = data.get("title", "Unknown")
+    caption_parts.append(f"📌 Title: {title}")
+
+    year = data.get("year", "Unknown")
+    caption_parts.append(f"📅 Year: {year}")
+
+    season_episode = data.get("season_episode")
+    if season_episode:
+        caption_parts.append(f"📺 {season_episode}")
+
+    quality = data.get("quality", "Unknown")
+    caption_parts.append(f"🎬 Quality: {quality}")
+
+    duration = data.get("duration", "Unknown")
+    caption_parts.append(f"⏳ Duration: {duration}")
+
+    languages = data.get("languages")
+    if languages:
+        lang_str = ", ".join(languages)
+        caption_parts.append(f"🔊 Languages: {lang_str}")
+    else:
+        caption_parts.append("🔊 Languages: Unknown")
+
+    subtitles = data.get("subtitles", "Unknown")
+    caption_parts.append(f"💬 Subtitles: {subtitles}")
+
+    return "\n".join(caption_parts)
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -482,16 +622,20 @@ async def get_clone_shortlink(link, url, api):
     return link
 
 async def get_shortlink(chat_id, link):
-    settings = await get_settings(chat_id) #fetching settings for group
-    if 'shortlink' in settings.keys():
-        URL = settings['shortlink']
-        API = settings['shortlink_api']
-    else:
-        URL = SHORTLINK_URL
-        API = SHORTLINK_API
+    settings = await get_settings(chat_id) # Group specific settings
+    bot_settings = await db.get_bot_settings() # Global bot settings
+
+    # Prioritize group-specific settings, fallback to global, then to None
+    URL = settings.get('shortlink_url') or bot_settings.get('shortlink_url')
+    API = settings.get('shortlink_api') or bot_settings.get('shortlink_api')
+
+    if not URL or not API:
+        return link # Return original link if no shortener is configured
+
     if URL.startswith("shorturllink") or URL.startswith("terabox.in") or URL.startswith("urlshorten.in"):
-        URL = SHORTLINK_URL
-        API = SHORTLINK_API
+        # Fallback for misconfigured URLs
+        URL = bot_settings.get('shortlink_url')
+        API = bot_settings.get('shortlink_api')
     if URL == "api.shareus.io":
         url = f'https://{URL}/easy_api'
         params = {
@@ -507,8 +651,11 @@ async def get_shortlink(chat_id, link):
             logger.error(e)
             return link
     else:
-        shortzy = Shortzy(api_key=API, base_site=URL)
-        link = await shortzy.convert(link)
+        try:
+            shortzy = Shortzy(api_key=API, base_site=URL)
+            link = await shortzy.convert(link)
+        except Exception as e:
+            logger.error(e)
         return link
 
 async def get_tutorial(chat_id):
@@ -552,10 +699,18 @@ async def get_token(bot, userid, link):
     if not await db.is_user_exist(user.id):
         await db.add_user(user.id, user.first_name)
         await bot.send_message(LOG_CHANNEL, script.LOG_TEXT_P.format(user.id, user.mention))
+
+    settings = await db.get_bot_settings()
+
     token = ''.join(random.choices(string.ascii_letters + string.digits, k=7))
     await db.update_token(user.id, token)
     link = f"{link}verify-{user.id}-{token}"
-    shortened_verify_url = await get_verify_shorted_link(link, VERIFY_SHORTLINK_URL, VERIFY_SHORTLINK_API)
+
+    verify_shortlink_url = settings.get("verify_shortlink_url")
+    verify_shortlink_api = settings.get("verify_shortlink_api")
+
+    shortened_verify_url = await get_verify_shorted_link(link, verify_shortlink_url, verify_shortlink_api)
+
     if VERIFY_SECOND_SHORTNER == True:
         snd_link = await get_verify_shorted_link(shortened_verify_url, VERIFY_SND_SHORTLINK_URL, VERIFY_SND_SHORTLINK_API)
         return str(snd_link)
@@ -589,25 +744,15 @@ async def send_all(bot, userid, files, ident, chat_id, user_name, query):
             for file in files:
                 title = file["file_name"]
                 size = get_size(file["file_size"])
-                if not await db.has_premium_access(userid) and SHORTLINK_MODE == True:
+                if not await db.has_premium_access(userid) and (await db.get_bot_settings()).get('shortlink_mode') == True:
                     await bot.send_message(chat_id=userid, text=f"<b>Hᴇʏ ᴛʜᴇʀᴇ {user_name} 👋🏽 \n\n✅ Sᴇᴄᴜʀᴇ ʟɪɴᴋ ᴛᴏ ʏᴏᴜʀ ғɪʟᴇ ʜᴀs sᴜᴄᴄᴇssғᴜʟʟʏ ʙᴇᴇɴ ɢᴇɴᴇʀᴀᴛᴇᴅ ᴘʟᴇᴀsᴇ ᴄʟɪᴄᴋ ᴅᴏᴡɴʟᴏᴀᴅ ʙᴜᴛᴛᴏɴ\n\n🗃️ Fɪʟᴇ Nᴀᴍᴇ : {title}\n🔖 Fɪʟᴇ Sɪᴢᴇ : {size}</b>", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("📤 Dᴏᴡɴʟᴏᴀᴅ 📥", url=await get_shortlink(chat_id, f"https://telegram.me/{temp.U_NAME}?start=files_{file['file_id']}"))]]))
         else:
             for file in files:
                 f_caption = file["caption"]
                 title = file["file_name"]
                 size = get_size(file["file_size"])
-                if CUSTOM_FILE_CAPTION:
-                    try:
-                        f_caption = CUSTOM_FILE_CAPTION.format(
-                            file_name='' if title is None else title,
-                            file_size='' if size is None else size,
-                            file_caption='' if f_caption is None else f_caption
-                        )
-                    except Exception as e:
-                        print(e)
-                        f_caption = f_caption
-                if f_caption is None:
-                    f_caption = f"{title}"
+                parsed_data = parse_info(title, f_caption)
+                f_caption = format_caption(parsed_data)
                 await bot.send_cached_media(
                     chat_id=userid,
                     file_id=file["file_id"],

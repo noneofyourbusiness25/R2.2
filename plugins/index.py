@@ -43,7 +43,7 @@ async def index_files_cb(bot, query):
             reply_to_message_id=int(lst_msg_id)
         )
     await msg.edit(
-        "Starting Indexing",
+        "Starting Indexing...",
         reply_markup=InlineKeyboardMarkup(
             [[InlineKeyboardButton('Cancel', callback_data='index_cancel')]]
         )
@@ -52,6 +52,14 @@ async def index_files_cb(bot, query):
         chat = int(chat)
     except:
         chat = chat
+
+    # Pre-flight check to see if the bot can access messages
+    try:
+        await bot.get_messages(chat, 1)
+    except Exception as e:
+        await msg.edit(f"Could not fetch messages from the channel.\n\n**Error:** `{e}`\n\nPlease make sure the bot is an admin in the channel and has the permission to read message history.")
+        return
+
     await index_files_to_db(int(lst_msg_id), chat, msg, bot)
 
 
@@ -179,7 +187,7 @@ async def index_files_to_db(lst_msg_id, chat, msg, bot):
                 elif message.media not in [enums.MessageMediaType.VIDEO, enums.MessageMediaType.AUDIO, enums.MessageMediaType.DOCUMENT]:
                     unsupported += 1
                     continue
-                
+
                 media = getattr(message, message.media.value, None)
                 if not media:
                     unsupported += 1
@@ -187,7 +195,7 @@ async def index_files_to_db(lst_msg_id, chat, msg, bot):
 
                 file_id, file_ref = unpack_new_file_id(media.file_id)
                 file_name = clean_file_name(media.file_name)
-                
+
                 files_batch.append({
                     '_id': file_id,
                     'file_ref': file_ref,
