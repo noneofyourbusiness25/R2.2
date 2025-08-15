@@ -1,4 +1,4 @@
-import re, os, json, random, asyncio, logging
+import re, os, json, random, asyncio, logging, string, http.client
 from info import *
 from imdb import Cinemagoer
 from pyrogram.types import Message, InlineKeyboardButton, InlineKeyboardMarkup
@@ -148,6 +148,8 @@ def compute_score(query_meta, file_meta):
 # --- Other Helper Functions from utils.py ---
 
 def get_size(size):
+    if not size:
+        return "0B"
     units = ["Bytes", "KB", "MB", "GB", "TB", "PB", "EB"]
     size = float(size)
     i = 0
@@ -165,18 +167,15 @@ async def save_group_settings(group_id, key, value):
     await db.update_settings(group_id, current)
 
 async def is_subscribed(bot, query):
-    # Simplified version for brevity
     try:
         user = await bot.get_chat_member(AUTH_CHANNEL, query.from_user.id)
         return user.status not in [enums.ChatMemberStatus.BANNED, enums.ChatMemberStatus.LEFT]
     except UserNotParticipant:
         return False
     except Exception:
-        return True # Assume subscribed if there's an error to avoid blocking users
+        return True
 
 async def pub_is_subscribed(bot, query, channel):
-    # This function seems to be for multiple force-subscribe channels
-    # Re-implementing based on its original purpose
     btn = []
     for id in channel:
         chat = await bot.get_chat(int(id))
@@ -185,3 +184,56 @@ async def pub_is_subscribed(bot, query, channel):
         except UserNotParticipant:
             btn.append([InlineKeyboardButton(f'Join {chat.title}', url=chat.invite_link)])
     return btn
+
+async def get_shortlink(chat_id, link):
+    settings = await get_settings(chat_id)
+    URL = settings.get('shortlink_url')
+    API = settings.get('shortlink_api')
+    if not URL or not API:
+        return link
+    try:
+        shortzy = Shortzy(api_key=API, base_site=URL)
+        link = await shortzy.convert(link)
+    except Exception as e:
+        logger.error(e)
+    return link
+
+async def get_tutorial(chat_id):
+    settings = await get_settings(chat_id)
+    return settings.get('tutorial')
+
+async def get_seconds(time_string):
+    def extract_value_and_unit(ts):
+        value = "".join(filter(str.isdigit, ts))
+        unit = "".join(filter(str.isalpha, ts))
+        return int(value) if value else 0, unit
+    value, unit = extract_value_and_unit(time_string)
+    if unit == 's': return value
+    elif unit == 'min': return value * 60
+    elif unit == 'hour': return value * 3600
+    elif unit == 'day': return value * 86400
+    elif unit == 'month': return value * 86400 * 30
+    elif unit == 'year': return value * 86400 * 365
+    return 0
+
+async def check_token(bot, userid, token):
+    user = await bot.get_users(userid)
+    if not await db.is_user_exist(user.id):
+        await db.add_user(user.id, user.first_name)
+    db_token = await db.get_token(user.id)
+    return db_token and db_token == token
+
+async def get_token(bot, userid, link):
+    user = await bot.get_users(userid)
+    if not await db.is_user_exist(user.id):
+        await db.add_user(user.id, user.first_name)
+    token = ''.join(random.choices(string.ascii_letters + string.digits, k=7))
+    await db.update_token(user.id, token)
+    return f"{link}verify-{user.id}-{token}"
+
+async def verify_user(bot, userid, token):
+    await db.update_verification(userid, verified=True, verified_time=datetime.now())
+    await db.update_token(userid, token=None)
+
+async def check_verification(bot, userid):
+    return await db.get_verification_status(userid)
