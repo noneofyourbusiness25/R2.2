@@ -76,7 +76,17 @@ async def verification_shortener_settings(client, message):
         _, url, api = message.text.split()
         await db.update_bot_settings("verify_shortlink_url", url)
         await db.update_bot_settings("verify_shortlink_api", api)
-        await message.reply_text(f"Verification shortener updated successfully.\nURL: `{url}`\nAPI: `{api}`")
+
+        # Read the settings back from the database to confirm
+        settings = await db.get_bot_settings()
+        new_url = settings.get("verify_shortlink_url")
+        new_api = settings.get("verify_shortlink_api")
+
+        await message.reply_text(
+            f"**Success! Verification shortener has been updated.**\n\n"
+            f"**New URL:** `{new_url}`\n"
+            f"**New API:** `{new_api}`"
+        )
     except ValueError:
         await message.reply_text("Invalid format. Use `/verifyshortener <url> <api>`.")
     except Exception as e:
