@@ -347,18 +347,42 @@ async def broadcast_messages_group(chat_id, message):
     except Exception as e:
         return False, "Error"
 
+USER_AGENTS = [
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/109.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/109.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.1 Safari/605.1.15',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 13_1) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.1 Safari/605.1.15',
+]
+
 async def search_gagala(text):
-    usr_agent = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) '
-        'Chrome/61.0.3163.100 Safari/537.36'
-        }
+    usr_agent = {'User-Agent': random.choice(USER_AGENTS)}
     text = text.replace(" ", '+')
     url = f'https://www.google.com/search?q={text}'
-    response = requests.get(url, headers=usr_agent)
-    response.raise_for_status()
-    soup = BeautifulSoup(response.text, 'html.parser')
-    titles = soup.find_all( 'h3' )
-    return [title.getText() for title in titles]
+    retries = 3
+    delay = 1
+    for i in range(retries):
+        try:
+            response = requests.get(url, headers=usr_agent)
+            response.raise_for_status()
+            soup = BeautifulSoup(response.text, 'html.parser')
+            titles = soup.find_all( 'h3' )
+            return [title.getText() for title in titles]
+        except requests.exceptions.HTTPError as e:
+            if e.response.status_code == 429:
+                logger.warning(f"Rate limited by Google. Retrying in {delay} seconds...")
+                await asyncio.sleep(delay)
+                delay *= 2
+            else:
+                logger.error(f"HTTP Error on search_gagala: {e}")
+                return []
+        except Exception as e:
+            logger.error(f"An unexpected error occurred in search_gagala: {e}")
+            return []
+    logger.error("Failed to get search results after multiple retries.")
+    return []
 
 async def get_settings(group_id):
     settings = await db.get_settings(group_id)
