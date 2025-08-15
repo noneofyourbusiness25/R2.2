@@ -129,97 +129,81 @@ def get_language_regex(language):
     tokens = LANGUAGES[language]
     return r'\b(' + '|'.join(tokens) + r')\b'
 
-STOP_WORDS = ["download", "full", "hd", "send", "movie", "series"]
+def build_filter_query(state):
+    query_text = state.get('query', '')
+    filters = state.get('filters', {})
+    filter_clauses = []
 
-def normalize_and_generate_regex(query_text):
-    # Clean the query by removing stop words
-    query_text = ' '.join([word for word in query_text.split() if word.lower() not in STOP_WORDS])
+    # --- Title Filter ---
+    # Each word in the query must be present in the name or caption
+    title_parts = [re.escape(part) for part in query_text.split() if part]
+    if title_parts:
+        for part in title_parts:
+            regex = re.compile(part, flags=re.IGNORECASE)
+            filter_clauses.append({'$or': [{'file_name': regex}, {'caption': regex}]})
 
-    # --- Parse Season/Episode ---
-    se_pattern = None
-    se_match = re.search(r'\b(s|season)\s?(\d{1,2})[\s\._-]*(e|ep|episode)\s?(\d{1,3})\b', query_text, re.IGNORECASE)
-    if se_match:
-        season = int(se_match.group(2))
-        episode = int(se_match.group(4))
-        # Create a flexible regex for SXXEXX format
+    # --- Season/Episode Filter ---
+    season = filters.get('s')
+    episode = filters.get('e')
+    if season and episode:
+        # Strict SXXEXX search
         s_str, s0_str = f"{season:01d}", f"{season:02d}"
         e_str, e0_str = f"{episode:01d}", f"{episode:02d}"
-        # This handles S01E02, S01.E02, S01 EP 02, S01EP02 etc.
         se_pattern = f"S(0?{s_str}|{s0_str})[\\s\\._-]*?(E|EP)?[\\s\\._-]*?(0?{e_str}|{e0_str})"
-        query_text = query_text.replace(se_match.group(0), '', 1)
+        se_regex = re.compile(se_pattern, re.IGNORECASE)
+        filter_clauses.append({'$or': [{'file_name': se_regex}, {'caption': se_regex}]})
+    elif season:
+        # Search for season only, e.g., "S01" or "Season 01"
+        season_pattern = r'\b(s|season)\s?(0?' + str(season) + r'|' + f"{season:02d}" + r')\b'
+        season_regex = re.compile(season_pattern, re.IGNORECASE)
+        filter_clauses.append({'$or': [{'file_name': season_regex}, {'caption': season_regex}]})
 
-    # --- Parse Year ---
-    year_pattern = None
-    year_match = re.search(r'\b(19|20)\d{2}\b', query_text)
-    if year_match:
-        year_pattern = year_match.group(0)
-        query_text = query_text.replace(year_match.group(0), '', 1)
+    # --- Year Filter ---
+    year = filters.get('year')
+    if year:
+        year_regex = re.compile(str(year))
+        filter_clauses.append({'$or': [{'file_name': year_regex}, {'caption': year_regex}]})
 
-    # --- The rest is the title ---
-    # The remaining parts of the query are treated as title keywords
-    title_parts = query_text.strip().split()
+    # --- Language Filter ---
+    language = filters.get('lang')
+    if language and language != "english":
+        lang_regex_str = get_language_regex(language)
+        if lang_regex_str:
+            lang_regex = re.compile(lang_regex_str, re.IGNORECASE)
+            filter_clauses.append({'$or': [{'file_name': lang_regex}, {'caption': lang_regex}]})
+    elif language == "english":
+        all_other_lang_tokens = [token for lang, tokens in LANGUAGES.items() if lang != 'english' for token in tokens]
+        other_langs_regex = re.compile(r'\b(' + '|'.join(all_other_lang_tokens) + r')\b', re.IGNORECASE)
+        filter_clauses.append({
+            '$nor': [
+                {'file_name': other_langs_regex},
+                {'caption': other_langs_regex}
+            ]
+        })
 
-    # --- Build a simple, ordered regex ---
-    # This is much faster than lookaheads.
-    all_parts = [re.escape(part) for part in title_parts if part]
-    if year_pattern:
-        all_parts.append(year_pattern)
-    if se_pattern:
-        all_parts.append(se_pattern)
+    if not filter_clauses:
+        return {} # Match all documents if no criteria is provided
 
-    # Join all parts with '.*' to find them in order, separated by anything.
-    final_regex = '.*'.join(all_parts)
-
-    return final_regex if final_regex else ".*"
+    # Combine all clauses with $and
+    return {'$and': filter_clauses} if len(filter_clauses) > 1 else filter_clauses[0]
 
 async def get_search_results(chat_id, query, file_type=None, max_results=10, offset=0, filter=False):
     """For given query return (results, next_offset, total_results)"""
 
     start_time = time.monotonic()
 
-    raw_pattern = normalize_and_generate_regex(query)
+    if isinstance(query, str):
+        # Handle old format or calls from other parts of the code for compatibility
+        state = {'query': query, 'filters': {}}
+    else:
+        state = query
 
-    try:
-        regex = re.compile(raw_pattern, flags=re.IGNORECASE)
-    except re.error:
-        regex = re.escape(query)
+    # Use the new, robust query builder
+    filter_criteria = build_filter_query(state)
 
-    filter_criteria = {'$or': [{'file_name': regex}, {'caption': regex}]}
-
-    # Extract language from query for filtering
-    language = None
-    query_parts = query.lower().split()
-    for part in query_parts:
-        for lang, tokens in LANGUAGES.items():
-            if part in tokens:
-                language = lang
-                break
-        if language:
-            break
-
-    if language and language != "english":
-        lang_regex = re.compile(get_language_regex(language), re.IGNORECASE)
-        filter_criteria = {
-            '$and': [
-                filter_criteria,
-                {'$or': [{'file_name': lang_regex}, {'caption': lang_regex}]}
-            ]
-        }
-    elif language == "english":
-        all_other_lang_tokens = [token for lang, tokens in LANGUAGES.items() if lang != 'english' for token in tokens]
-        other_langs_regex = re.compile(r'\b(' + '|'.join(all_other_lang_tokens) + r')\b', re.IGNORECASE)
-
-        filter_criteria = {
-            '$and': [
-                filter_criteria,
-                {
-                    '$nor': [
-                        {'file_name': other_langs_regex},
-                        {'caption': other_langs_regex}
-                    ]
-                }
-            ]
-        }
+    # For logging purposes, create a representative string
+    query_log_string = json.dumps(state)
+    raw_pattern = query_log_string # Use the json string for the pattern log
 
     # Get total count for pagination
     total_results = 0
@@ -228,7 +212,7 @@ async def get_search_results(chat_id, query, file_type=None, max_results=10, off
         if MULTIPLE_DATABASE:
             total_results += sec_col.count_documents(filter_criteria)
     except Exception as e:
-        logger.exception(f"Count documents failed | query='{query}' | pattern='{raw_pattern}'")
+        logger.exception(f"Count documents failed | query='{query_log_string}'")
 
     # Fetch paginated results
     files = []
@@ -237,32 +221,31 @@ async def get_search_results(chat_id, query, file_type=None, max_results=10, off
 
     if MULTIPLE_DATABASE:
         try:
+            # Primary DB query
+            primary_count = col.count_documents(filter_criteria)
             cursor1 = col.find(filter_criteria).sort('$natural', -1).skip(offset).limit(max_results)
             for file in cursor1:
                 files.append(file)
                 fetched_primary += 1
-        except Exception as e:
-            logger.exception(f"Primary DB find failed | query='{query}' | pattern='{raw_pattern}'")
 
-        # Adjust offset and limit for the second database if needed
-        remaining_limit = max_results - fetched_primary
-        if remaining_limit > 0:
-            secondary_offset = max(0, offset - total_results) # A simple way to handle offset across DBs
-            try:
+            # Secondary DB query if needed
+            remaining_limit = max_results - fetched_primary
+            if remaining_limit > 0:
+                secondary_offset = max(0, offset - primary_count)
                 cursor2 = sec_col.find(filter_criteria).sort('$natural', -1).skip(secondary_offset).limit(remaining_limit)
                 for file in cursor2:
                     files.append(file)
                     fetched_secondary += 1
-            except Exception as e:
-                logger.exception(f"Secondary DB find failed | query='{query}' | pattern='{raw_pattern}'")
+        except Exception as e:
+            logger.exception(f"DB find failed | query='{query_log_string}'")
     else:
         try:
             cursor = col.find(filter_criteria).sort('$natural', -1).skip(offset).limit(max_results)
             for file in cursor:
                 files.append(file)
                 fetched_primary += 1
-        except Exception:
-            logger.exception(f"Primary DB find failed (single DB mode) | query='{query}' | pattern='{raw_pattern}'")
+        except Exception as e:
+            logger.exception(f"Primary DB find failed (single DB mode) | query='{query_log_string}'")
 
     current_fetched = len(files)
     next_offset = offset + current_fetched if total_results > offset + current_fetched else ""
@@ -270,7 +253,7 @@ async def get_search_results(chat_id, query, file_type=None, max_results=10, off
     duration_ms = int((time.monotonic() - start_time) * 1000)
     logger.info(
         "get_search_results stats | query='%s' | pattern='%s' | total=%s | next_offset=%s | fetched_primary=%s | fetched_secondary=%s | duration_ms=%s",
-        query,
+        query_log_string,
         raw_pattern,
         total_results,
         next_offset,

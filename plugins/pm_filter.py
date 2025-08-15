@@ -2,7 +2,7 @@
 # Subscribe YouTube Channel For Amazing Bot @Tech_VJ
 # Ask Doubt on telegram @KingVJ01
 
-import os, logging, string, asyncio, time, re, ast, random, math, pytz, pyrogram, base64
+import os, logging, string, asyncio, time, re, ast, random, math, pytz, pyrogram, base64, json
 from datetime import datetime, timedelta, date, time
 from Script import script
 from info import *
@@ -94,17 +94,26 @@ async def next_page(bot, query):
         offset = int(offset)
     except:
         offset = 0
-    search = base64.urlsafe_b64decode(key).decode()
 
-    files, n_offset, total = await get_search_results(query.message.chat.id, search, offset=offset, filter=True)
-    logger.info(f"next_page | chat_id={query.message.chat.id} | user_id={query.from_user.id} | search='{search}' | offset_in={offset} | next_offset_raw={n_offset} | total={total} | files_returned={len(files) if files else 0}")
+    try:
+        # New format: base64 encoded json
+        state_json = base64.urlsafe_b64decode(key).decode()
+        state = json.loads(state_json)
+        search_log_text = json.dumps(state)
+    except Exception:
+        # Old format: simple base64 encoded string
+        search_log_text = base64.urlsafe_b64decode(key).decode()
+        state = {'query': search_log_text, 'filters': {}}
+
+    files, n_offset, total = await get_search_results(query.message.chat.id, state, offset=offset, filter=True)
+    logger.info(f"next_page | chat_id={query.message.chat.id} | user_id={query.from_user.id} | search='{search_log_text}' | offset_in={offset} | next_offset_raw={n_offset} | total={total} | files_returned={len(files) if files else 0}")
     try:
         n_offset = int(n_offset)
     except:
         n_offset = 0
 
     if not files:
-        logger.error(f"next_page ZERO RESULTS | chat_id={query.message.chat.id} | search='{search}' | offset_in={offset}")
+        logger.error(f"next_page ZERO RESULTS | chat_id={query.message.chat.id} | search='{search_log_text}' | offset_in={offset}")
         return
     temp.GETALL[key] = files
     temp.SHORT[query.from_user.id] = query.message.chat.id
@@ -219,12 +228,12 @@ async def next_page(bot, query):
 
 @Client.on_callback_query(filters.regex(r"^filter_results#"))
 async def filter_results_cb_handler(client: Client, query: CallbackQuery):
-    _, encoded_search = query.data.split("#")
+    _, encoded_state = query.data.split("#")
 
     btn = [
-        [InlineKeyboardButton("🎬 Movies", callback_data=f"movies#{encoded_search}")],
-        [InlineKeyboardButton("📺 Series", callback_data=f"series#{encoded_search}")],
-        [InlineKeyboardButton("⬅️ Back to Home", callback_data=f"next_0_{encoded_search}_0")]
+        [InlineKeyboardButton("🎬 Movies", callback_data=f"movies#{encoded_state}")],
+        [InlineKeyboardButton("📺 Series", callback_data=f"series#{encoded_state}")],
+        [InlineKeyboardButton("⬅️ Back to Home", callback_data=f"next_0_{encoded_state}_0")]
     ]
 
     await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(btn))
@@ -232,10 +241,10 @@ async def filter_results_cb_handler(client: Client, query: CallbackQuery):
 @Client.on_callback_query(filters.regex(r"^movies#"))
 async def movies_cb_handler(client: Client, query: CallbackQuery):
     try:
-        _, encoded_search, page = query.data.split("#")
+        _, encoded_state, page = query.data.split("#")
         page = int(page)
     except:
-        _, encoded_search = query.data.split("#")
+        _, encoded_state = query.data.split("#")
         page = 1
 
     years_per_page = 20
@@ -254,7 +263,7 @@ async def movies_cb_handler(client: Client, query: CallbackQuery):
                 row.append(
                     InlineKeyboardButton(
                         text=f"🗓️ {page_years[i+j]}",
-                        callback_data=f"year#{page_years[i+j]}#{encoded_search}"
+                        callback_data=f"year#{page_years[i+j]}#{encoded_state}"
                     )
                 )
         btn.append(row)
@@ -263,27 +272,38 @@ async def movies_cb_handler(client: Client, query: CallbackQuery):
     pagination_buttons = []
     if page > 1:
         pagination_buttons.append(
-            InlineKeyboardButton("« Back", callback_data=f"movies#{encoded_search}#{page-1}")
+            InlineKeyboardButton("« Back", callback_data=f"movies#{encoded_state}#{page-1}")
         )
     if end_index < len(years):
         pagination_buttons.append(
-            InlineKeyboardButton("Next »", callback_data=f"movies#{encoded_search}#{page+1}")
+            InlineKeyboardButton("Next »", callback_data=f"movies#{encoded_state}#{page+1}")
         )
 
     if pagination_buttons:
         btn.append(pagination_buttons)
 
-    btn.append([InlineKeyboardButton("⬅️ Back to Filter Type", callback_data=f"filter_results#{encoded_search}")])
+    btn.append([InlineKeyboardButton("⬅️ Back to Filter Type", callback_data=f"filter_results#{encoded_state}")])
 
     await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(btn))
 
 @Client.on_callback_query(filters.regex(r"^year#"))
 async def year_select_cb_handler(client: Client, query: CallbackQuery):
-    _, year, encoded_search = query.data.split("#")
+    _, year, encoded_state = query.data.split("#")
 
-    search = base64.urlsafe_b64decode(encoded_search).decode()
-    search = f"{search} {year}"
-    new_encoded_search = base64.urlsafe_b64encode(search.encode()).decode()
+    try:
+        state_json = base64.urlsafe_b64decode(encoded_state).decode()
+        state = json.loads(state_json)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        # Fallback for old format
+        state = {'query': base64.urlsafe_b64decode(encoded_state).decode(), 'filters': {}}
+
+    state['filters']['year'] = int(year)
+
+    # Remove other conflicting filters if any
+    state['filters'].pop('s', None)
+    state['filters'].pop('e', None)
+
+    new_encoded_state = base64.urlsafe_b64encode(json.dumps(state).encode()).decode()
 
     languages = list(LANGUAGES.keys())
     btn = []
@@ -294,18 +314,18 @@ async def year_select_cb_handler(client: Client, query: CallbackQuery):
                 row.append(
                     InlineKeyboardButton(
                         text=f"🌐 {languages[i+j].title()}",
-                        callback_data=f"lang#{languages[i+j]}#{new_encoded_search}"
+                        callback_data=f"lang#{languages[i+j]}#{new_encoded_state}"
                     )
                 )
         btn.append(row)
 
-    btn.append([InlineKeyboardButton("⬅️ Back", callback_data=f"movies#{encoded_search}")])
+    btn.append([InlineKeyboardButton("⬅️ Back", callback_data=f"movies#{encoded_state}")])
 
     await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(btn))
 
 @Client.on_callback_query(filters.regex(r"^series#"))
 async def series_cb_handler(client: Client, query: CallbackQuery):
-    _, encoded_search = query.data.split("#")
+    _, encoded_state = query.data.split("#")
 
     seasons = [str(s) for s in range(1, 21)]
     btn = []
@@ -316,22 +336,31 @@ async def series_cb_handler(client: Client, query: CallbackQuery):
                 row.append(
                     InlineKeyboardButton(
                         text=f"📺 Season {seasons[i+j]}",
-                        callback_data=f"season#{seasons[i+j]}#{encoded_search}"
+                        callback_data=f"season#{seasons[i+j]}#{encoded_state}"
                     )
                 )
         btn.append(row)
 
-    btn.append([InlineKeyboardButton("⬅️ Back", callback_data=f"filter_results#{encoded_search}")])
+    btn.append([InlineKeyboardButton("⬅️ Back", callback_data=f"filter_results#{encoded_state}")])
 
     await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(btn))
 
 @Client.on_callback_query(filters.regex(r"^season#"))
 async def season_select_cb_handler(client: Client, query: CallbackQuery):
-    _, season, encoded_search = query.data.split("#")
+    _, season, encoded_state = query.data.split("#")
 
-    search = base64.urlsafe_b64decode(encoded_search).decode()
-    search = f"{search} s{int(season):02d}"
-    new_encoded_search = base64.urlsafe_b64encode(search.encode()).decode()
+    try:
+        state_json = base64.urlsafe_b64decode(encoded_state).decode()
+        state = json.loads(state_json)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        state = {'query': base64.urlsafe_b64decode(encoded_state).decode(), 'filters': {}}
+
+    state['filters']['s'] = int(season)
+    # Clear episode if season is changed
+    state['filters'].pop('e', None)
+    state['filters'].pop('year', None)
+
+    new_encoded_state = base64.urlsafe_b64encode(json.dumps(state).encode()).decode()
 
     episodes_per_page = 20
     episodes = [str(e) for e in range(1, 101)]
@@ -346,22 +375,22 @@ async def season_select_cb_handler(client: Client, query: CallbackQuery):
                 row.append(
                     InlineKeyboardButton(
                         text=f"🎬 {page_episodes[i+j]}",
-                        callback_data=f"episode#{page_episodes[i+j]}#{new_encoded_search}"
+                        callback_data=f"episode#{page_episodes[i+j]}#{new_encoded_state}"
                     )
                 )
         btn.append(row)
 
     if len(episodes) > episodes_per_page:
-        btn.append([InlineKeyboardButton("Next »", callback_data=f"episodes_page#{new_encoded_search}#{season}#2")])
+        btn.append([InlineKeyboardButton("Next »", callback_data=f"episodes_page#{new_encoded_state}#{season}#2")])
 
-    btn.append([InlineKeyboardButton("⬅️ Back to Seasons", callback_data=f"series#{encoded_search}")])
+    btn.append([InlineKeyboardButton("⬅️ Back to Seasons", callback_data=f"series#{encoded_state}")])
 
     await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(btn))
 
 
 @Client.on_callback_query(filters.regex(r"^episodes_page#"))
 async def episodes_page_cb_handler(client: Client, query: CallbackQuery):
-    _, encoded_search, season, page = query.data.split("#")
+    _, encoded_state, season, page = query.data.split("#")
     page = int(page)
 
     episodes_per_page = 20
@@ -380,7 +409,7 @@ async def episodes_page_cb_handler(client: Client, query: CallbackQuery):
                 row.append(
                     InlineKeyboardButton(
                         text=f"🎬 {page_episodes[i+j]}",
-                        callback_data=f"episode#{page_episodes[i+j]}#{encoded_search}"
+                        callback_data=f"episode#{page_episodes[i+j]}#{encoded_state}"
                     )
                 )
         btn.append(row)
@@ -389,28 +418,34 @@ async def episodes_page_cb_handler(client: Client, query: CallbackQuery):
     pagination_buttons = []
     if page > 1:
         pagination_buttons.append(
-            InlineKeyboardButton("« Back", callback_data=f"episodes_page#{encoded_search}#{season}#{page-1}")
+            InlineKeyboardButton("« Back", callback_data=f"episodes_page#{encoded_state}#{season}#{page-1}")
         )
     if end_index < len(episodes):
         pagination_buttons.append(
-            InlineKeyboardButton("Next »", callback_data=f"episodes_page#{encoded_search}#{season}#{page+1}")
+            InlineKeyboardButton("Next »", callback_data=f"episodes_page#{encoded_state}#{season}#{page+1}")
         )
 
     if pagination_buttons:
         btn.append(pagination_buttons)
 
-    btn.append([InlineKeyboardButton("⬅️ Back to Seasons", callback_data=f"series#{encoded_search}")])
+    btn.append([InlineKeyboardButton("⬅️ Back to Seasons", callback_data=f"series#{encoded_state}")])
 
     await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(btn))
 
 
 @Client.on_callback_query(filters.regex(r"^episode#"))
 async def episode_select_cb_handler(client: Client, query: CallbackQuery):
-    _, episode, encoded_search = query.data.split("#")
+    _, episode, encoded_state = query.data.split("#")
 
-    search = base64.urlsafe_b64decode(encoded_search).decode()
-    search = f"{search}e{int(episode):02d}"
-    new_encoded_search = base64.urlsafe_b64encode(search.encode()).decode()
+    try:
+        state_json = base64.urlsafe_b64decode(encoded_state).decode()
+        state = json.loads(state_json)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        state = {'query': base64.urlsafe_b64decode(encoded_state).decode(), 'filters': {}}
+
+    state['filters']['e'] = int(episode)
+
+    new_encoded_state = base64.urlsafe_b64encode(json.dumps(state).encode()).decode()
 
     languages = list(LANGUAGES.keys())
     btn = []
@@ -421,30 +456,38 @@ async def episode_select_cb_handler(client: Client, query: CallbackQuery):
                 row.append(
                     InlineKeyboardButton(
                         text=f"🌐 {languages[i+j].title()}",
-                        callback_data=f"lang#{languages[i+j]}#{new_encoded_search}"
+                        callback_data=f"lang#{languages[i+j]}#{new_encoded_state}"
                     )
                 )
         btn.append(row)
 
-    btn.append([InlineKeyboardButton("⬅️ Back", callback_data=f"season#1#{encoded_search}")]) # a bit of a hack here, we don't know the season number
+    btn.append([InlineKeyboardButton("⬅️ Back", callback_data=f"season#1#{encoded_state}")]) # a bit of a hack here, we don't know the season number
 
     await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(btn))
 
 @Client.on_callback_query(filters.regex(r"^lang#"))
 async def lang_select_cb_handler(client: Client, query: CallbackQuery):
-    _, lang, encoded_search = query.data.split("#")
+    _, lang, encoded_state = query.data.split("#")
 
-    search = base64.urlsafe_b64decode(encoded_search).decode()
-    search = f"{search} {lang}"
+    try:
+        state_json = base64.urlsafe_b64decode(encoded_state).decode()
+        state = json.loads(state_json)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        # This should ideally not happen if the flow starts correctly
+        search_query = base64.urlsafe_b64decode(encoded_state).decode()
+        state = {'query': search_query, 'filters': {}}
+
+    state['filters']['lang'] = lang
 
     # Final search
-    files, offset, total_results = await get_search_results(query.message.chat.id, search, offset=0, filter=True)
+    # The get_search_results function will now expect the state object
+    files, offset, total_results = await get_search_results(query.message.chat.id, state, offset=0, filter=True)
     if not files:
         await query.answer("🚫 𝗡𝗼 𝗙𝗶𝗹𝗲 𝗪𝗲𝗿𝗲 𝗙𝗼𝘂𝗻𝗱 🚫", show_alert=1)
         return
 
-    # a bit of a hack to reuse the existing display logic
-    await auto_filter(client, search, query.message.reply_to_message, query.message, True, spoll=(search, files, offset, total_results))
+    # Pass the state object to auto_filter
+    await auto_filter(client, state, query.message.reply_to_message, query.message, True, spoll=(state, files, offset, total_results))
 
 async def spell_check_helper(client, message, reply_msg):
     query = message.text
@@ -471,10 +514,14 @@ async def spell_check_helper(client, message, reply_msg):
 async def auto_filter(client, msg, message, reply_msg, ai_search, spoll=None):
     imdb = None
     if spoll:
-        search, files, offset, total_results = spoll
+        state, files, offset, total_results = spoll
+        search_text = state.get('query')
+        if not search_text: # Fallback for old data format
+            search_text = state if isinstance(state, str) else ''
     else:
-        search = msg
-        files, offset, total_results = await get_search_results(message.chat.id, search, offset=0, filter=True)
+        search_text = msg
+        state = {'query': search_text, 'filters': {}}
+        files, offset, total_results = await get_search_results(message.chat.id, state, offset=0, filter=True)
 
     if not files:
         if SPELL_CHECK_REPLY:
@@ -483,7 +530,9 @@ async def auto_filter(client, msg, message, reply_msg, ai_search, spoll=None):
             return await reply_msg.edit("🤷‍♂️ No results found 🤷‍♂️")
 
     settings = await get_settings(message.chat.id)
-    encoded_search = base64.urlsafe_b64encode(search.encode()).decode()
+
+    # The state object is now the source of truth
+    encoded_state = base64.urlsafe_b64encode(json.dumps(state).encode()).decode()
 
     if settings["button"]:
         btn = [
@@ -499,20 +548,20 @@ async def auto_filter(client, msg, message, reply_msg, ai_search, spoll=None):
         btn = []
 
     btn.insert(0, [
-        InlineKeyboardButton("𝐒𝐞𝐧𝐝 𝐀𝐥𝐥", callback_data=f"sendfiles#{encoded_search}")
+        InlineKeyboardButton("𝐒𝐞𝐧𝐝 𝐀𝐥𝐥", callback_data=f"sendfiles#{encoded_state}")
     ])
     btn.insert(1, [
-        InlineKeyboardButton("🔍 Filter Results", callback_data=f"filter_results#{encoded_search}")
+        InlineKeyboardButton("🔍 Filter Results", callback_data=f"filter_results#{encoded_state}")
     ])
 
     if offset != 0:
         btn.append(
-            [InlineKeyboardButton("𝐏𝐀𝐆𝐄", callback_data="pages"), InlineKeyboardButton(f"1/{math.ceil(total_results/10)}", callback_data="pages"), InlineKeyboardButton("𝐍𝐄𝐗𝐓 ➪", callback_data=f"next_0_{encoded_search}_{offset}")]
+            [InlineKeyboardButton("𝐏𝐀𝐆𝐄", callback_data="pages"), InlineKeyboardButton(f"1/{math.ceil(total_results/10)}", callback_data="pages"), InlineKeyboardButton("𝐍𝐄𝐗𝐓 ➪", callback_data=f"next_0_{encoded_state}_{offset}")]
         )
 
     if AUTO_FILTER_REPLY_MSG:
         if settings["imdb"]:
-            imdb = await get_poster(search)
+            imdb = await get_poster(search_text) # Use search_text for poster lookup
             if imdb:
                 caption = script.IMDB_TEMPLATE.format(
                     title=imdb['title'],
@@ -540,12 +589,12 @@ async def auto_filter(client, msg, message, reply_msg, ai_search, spoll=None):
                     genres=imdb['genres'],
                     poster=imdb['poster'],
                     plot=imdb['plot'],
-                    query=search
+                    query=search_text
                 )
             else:
-                caption = f"<b>Tɪᴛʟᴇ: {search.upper()}\n\nRᴇǫᴜᴇsᴛᴇד Bʏ: {message.from_user.mention}\n\nTᴏᴛᴀʟ Fɪʟᴇs: {total_results}\n\nEɴᴊᴏʏ Yᴏᴜʀ Mᴏᴠɪᴇ ✨</b>"
+                caption = f"<b>Tɪᴛʟᴇ: {search_text.upper()}\n\nRᴇǫᴜᴇsᴛᴇד Bʏ: {message.from_user.mention}\n\nTᴏᴛᴀʟ Fɪʟᴇs: {total_results}\n\nEɴᴊᴏʏ Yᴏᴜʀ Mᴏᴠɪᴇ ✨</b>"
         else:
-            caption = f"<b>Tɪᴛʟᴇ: {search.upper()}\n\nRᴇǫᴜᴇsᴛᴇᴅ Bʏ: {message.from_user.mention}\n\nTᴏᴛᴀʟ Fɪʟᴇs: {total_results}\n\nEɴᴊᴏʏ Yᴏᴜʀ Mᴏᴠɪᴇ ✨</b>"
+            caption = f"<b>Tɪᴛʟᴇ: {search_text.upper()}\n\nRᴇǫᴜᴇsᴛᴇᴅ Bʏ: {message.from_user.mention}\n\nTᴏᴛᴀʟ Fɪʟᴇs: {total_results}\n\nEɴᴊᴏʏ Yᴏᴜʀ Mᴏᴠɪᴇ ✨</b>"
 
         if imdb and imdb.get('poster'):
             try:
@@ -560,7 +609,7 @@ async def auto_filter(client, msg, message, reply_msg, ai_search, spoll=None):
             return
     else:
         await reply_msg.delete()
-        m = await message.reply_text(f"<b>Tɪᴛʟᴇ: {search.upper()}\n\nRᴇǫᴜᴇsᴛᴇᴅ Bʏ: {message.from_user.mention}\n\nTᴏᴛᴀʟ Fɪʟᴇs: {total_results}\n\nEɴᴊᴏʏ Yᴏᴜʀ Mᴏᴠɪᴇ ✨</b>", reply_markup=InlineKeyboardMarkup(btn))
+        m = await message.reply_text(f"<b>Tɪᴛʟᴇ: {search_text.upper()}\n\nRᴇǫᴜᴇsᴛᴇᴅ Bʏ: {message.from_user.mention}\n\nTᴏᴛᴀʟ Fɪʟᴇs: {total_results}\n\nEɴᴊᴏʏ Yᴏᴜʀ Mᴏᴠɪᴇ ✨</b>", reply_markup=InlineKeyboardMarkup(btn))
         if settings['auto_delete']:
             await asyncio.sleep(AUTO_DELETE_TIME)
             await m.delete()
