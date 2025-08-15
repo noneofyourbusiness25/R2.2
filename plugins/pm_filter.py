@@ -8,25 +8,21 @@ from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from pyrogram import Client, filters, enums
 from pyrogram.errors import UserIsBlocked
 from info import ADMINS, LOG_CHANNEL
-from utils import get_size, temp, get_settings, is_subscribed
-from database.ia_filterdb import get_search_results as get_initial_results
 from plugins.helpers import (
-    normalize_text,
-    extract_metadata,
-    compute_score,
-    LANGUAGES
+    get_size, temp, get_settings, is_subscribed,
+    normalize_text, extract_metadata, compute_score
 )
+from database.ia_filterdb import get_search_results as get_initial_results
 
 logger = logging.getLogger(__name__)
 
 # In-memory cache for search results and user filters
-# { search_key: { 'query': str, 'results': list, 'filters': dict } }
 temp.CACHED_RESULTS = {}
 
 @Client.on_message((filters.group | filters.private) & filters.text & filters.incoming)
 async def auto_filter_handler(client, message):
     if message.text.startswith("/"):
-        return  # Ignore commands
+        return
 
     settings = await get_settings(message.chat.id)
     if not settings.get('auto_ffilter', True):
@@ -47,33 +43,25 @@ async def run_search(client, message, query):
     reply_msg = await message.reply_text("🔎 `Searching...`")
 
     normalized_query = normalize_text(query)
-    query_meta = extract_metadata(normalized_query)
+    query_meta = extract_metadata({'file_name': normalized_query})
 
-    # 1. Get initial batch of files from DB
     initial_files, total_results = await get_initial_results(normalized_query)
     if not initial_files:
         return await reply_msg.edit("🤷‍♂️ `No results found!`")
 
-    # 2. Score and rank the files
     processed_results = []
     for file in initial_files:
-        text_to_process = f"{file.get('file_name', '')} {file.get('caption', '')}"
-        normalized_text = normalize_text(text_to_process)
-        file_meta = extract_metadata(normalized_text)
-
+        file_meta = extract_metadata(file)
         score = compute_score(query_meta, file_meta)
 
-        # Apply threshold
         if score >= 0.35:
             processed_results.append({'file': file, 'meta': file_meta, 'score': score})
 
-    # Sort by score
     processed_results.sort(key=lambda x: x['score'], reverse=True)
 
     if not processed_results:
         return await reply_msg.edit("🤷‍♂️ `No results found after filtering!`")
 
-    # 3. Cache results and generate UI
     search_key = base64.urlsafe_b64encode(os.urandom(8)).decode('utf-8')
     temp.CACHED_RESULTS[search_key] = {
         'results': processed_results,
@@ -91,7 +79,6 @@ async def display_results(message, search_key):
     results = cached_data['results']
     user_filters = cached_data['user_filters']
 
-    # Apply user's active filters to the processed results
     if user_filters:
         filtered_results = []
         for res in results:
@@ -109,10 +96,8 @@ async def display_results(message, search_key):
     if not filtered_results:
         return await message.edit("`No results match the selected filters.`")
 
-    # Build the dynamic UI
     buttons = build_dynamic_ui(filtered_results, search_key, user_filters)
 
-    # Prepare the text to display
     total = len(filtered_results)
     file_list_text = []
     for i, res in enumerate(filtered_results[:10]):
@@ -126,15 +111,8 @@ async def display_results(message, search_key):
 
 def build_dynamic_ui(results, search_key, user_filters):
     buttons = []
-
-    # --- Aggregate metadata for UI ---
     seasons, episodes, languages, years = defaultdict(int), defaultdict(int), defaultdict(int), defaultdict(int)
 
-    # Determine what types of media are in the results
-    has_series = any(r['meta']['season'] for r in results)
-    has_movies = any(r['meta']['year'] for r in results)
-
-    # Filter results based on current season filter to populate episodes correctly
     season_filter = user_filters.get('s')
 
     for res in results:
@@ -145,14 +123,13 @@ def build_dynamic_ui(results, search_key, user_filters):
             episodes[meta['episode']] += 1
         if meta.get('year'):
             years[meta['year']] += 1
-        for lang in meta.get('languages', []):
-            languages[lang] += 1
+        if meta.get('language'):
+            languages[meta['language']] += 1
 
-    # --- Row 1: Main Filter Types ---
     filter_row = []
     if seasons:
         filter_row.append(InlineKeyboardButton(f"📺 Seasons ({len(seasons)})", callback_data=f"ft_s#{search_key}"))
-    if years and not seasons: # Show year filter only if no series are detected
+    if years and not seasons:
         filter_row.append(InlineKeyboardButton(f"🎬 Years ({len(years)})", callback_data=f"ft_y#{search_key}"))
     if languages:
         filter_row.append(InlineKeyboardButton(f"🌐 Languages ({len(languages)})", callback_data=f"ft_l#{search_key}"))
@@ -162,7 +139,6 @@ def build_dynamic_ui(results, search_key, user_filters):
     if filter_row:
         buttons.append(filter_row)
 
-    # --- Row 2: Active Filters ---
     active_filters_row = []
     if 's' in user_filters:
         active_filters_row.append(InlineKeyboardButton(f"✅ S{user_filters['s']:02d}", callback_data=f"ft_s#{search_key}"))
@@ -182,11 +158,9 @@ def build_dynamic_ui(results, search_key, user_filters):
 
 @Client.on_callback_query(filters.regex(r"^ft_"))
 async def on_filter_type_cb(client, query):
-    """Handles selection of a filter type (e.g., 'Seasons')."""
     _, filter_type, search_key = query.data.split('#')
     cached_data = temp.CACHED_RESULTS.get(search_key)
-    if not cached_data:
-        return await query.answer("Search expired.", show_alert=True)
+    if not cached_data: return await query.answer("Search expired.", show_alert=True)
 
     results = cached_data['results']
     user_filters = cached_data['user_filters']
@@ -200,11 +174,10 @@ async def on_filter_type_cb(client, query):
             if res['meta']['year']: options[res['meta']['year']] += 1
     elif filter_type == 'l':
         for res in results:
-            for lang in res['meta'].get('languages', []): options[lang] += 1
+            if res['meta']['language']: options[res['meta']['language']] += 1
     elif filter_type == 'e':
         season_filter = user_filters.get('s')
-        if not season_filter:
-            return await query.answer("Please select a season first.", show_alert=True)
+        if not season_filter: return await query.answer("Please select a season first.", show_alert=True)
         for res in results:
             if res['meta'].get('season') == season_filter and res['meta'].get('episode'):
                 options[res['meta']['episode']] += 1
@@ -226,7 +199,6 @@ async def on_filter_type_cb(client, query):
 
 @Client.on_callback_query(filters.regex(r"^(flt_|back_)"))
 async def on_filter_value_cb(client, query):
-    """Handles selection of a specific filter value."""
     if query.data.startswith('back_'):
         search_key = query.data.split('_')[1]
         return await display_results(query.message, search_key)
@@ -235,8 +207,7 @@ async def on_filter_value_cb(client, query):
     filter_type, search_key, value = filter_type_val.split('#', 2)
 
     cached_data = temp.CACHED_RESULTS.get(search_key)
-    if not cached_data:
-        return await query.answer("Search expired.", show_alert=True)
+    if not cached_data: return await query.answer("Search expired.", show_alert=True)
 
     if filter_type == 'reset':
         cached_data['user_filters'] = {}
@@ -244,7 +215,6 @@ async def on_filter_value_cb(client, query):
         try: value = int(value)
         except ValueError: pass
         cached_data['user_filters'][filter_type] = value
-        # Reset episode filter if season is changed
         if filter_type == 's':
             cached_data['user_filters'].pop('e', None)
 
