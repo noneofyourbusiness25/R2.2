@@ -178,16 +178,11 @@ async def get_search_candidates(query, max_results=200):
     Get a larger, less-filtered list of candidates for further processing.
     This query should be simpler and faster than the main search.
     """
-    # Simple regex: match all words in any order.
-    # Using a simple regex is faster than a complex one with lookaheads.
-    # The scoring function will handle the fine-grained matching.
-    words = re.findall(r'\b\w+\b', query)
+    words = query.split()
     if not words:
         return []
 
-    # This creates a regex that looks for all words, in any order.
-    # It's a bit more flexible than the ordered '.*'.join(words)
-    regex_pattern = ''.join([f'(?=.*{re.escape(word)})' for word in words])
+    regex_pattern = '.*'.join([re.escape(word) for word in words])
 
     try:
         regex = re.compile(regex_pattern, flags=re.IGNORECASE)
