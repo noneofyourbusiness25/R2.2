@@ -43,7 +43,7 @@ async def index_files_cb(bot, query):
             reply_to_message_id=int(lst_msg_id)
         )
     await msg.edit(
-        "Starting Indexing",
+        "Starting Indexing...",
         reply_markup=InlineKeyboardMarkup(
             [[InlineKeyboardButton('Cancel', callback_data='index_cancel')]]
         )
@@ -52,6 +52,14 @@ async def index_files_cb(bot, query):
         chat = int(chat)
     except:
         chat = chat
+
+    # Pre-flight check to see if the bot can access messages
+    try:
+        await bot.get_messages(chat, 1)
+    except Exception as e:
+        await msg.edit(f"Could not fetch messages from the channel.\n\n**Error:** `{e}`\n\nPlease make sure the bot is an admin in the channel and has the permission to read message history.")
+        return
+
     await index_files_to_db(int(lst_msg_id), chat, msg, bot)
 
 
@@ -143,8 +151,7 @@ async def index_files_to_db(lst_msg_id, chat, msg, bot):
     no_media = 0
     unsupported = 0
     files_batch = []
-    batch_size = 200
-    indexing_interrupted = False
+    batch_size = 200  # Adjust batch size as needed
 
     async with lock:
         try:
@@ -152,74 +159,66 @@ async def index_files_to_db(lst_msg_id, chat, msg, bot):
             temp.CANCEL = False
             async for message in bot.iter_messages(chat, lst_msg_id, temp.CURRENT):
                 if temp.CANCEL:
-                    await msg.edit(f"Successfully Cancelled!\n\nSaved <code>{total_files}</code> files to database.\nDuplicate Files Skipped: <code>{duplicate}</code>\nDeleted Messages Skipped: <code>{deleted}</code>\nNon-Media messages skipped: <code>{no_media + unsupported}</code>\nErrors Occurred: <code>{errors}</code>")
+                    if files_batch:
+                        saved, dup = await save_files(files_batch)
+                        total_files += saved
+                        duplicate += dup
+                        files_batch.clear()
+                    await msg.edit(f"Successfully Cancelled!!\n\nSaved <code>{total_files}</code> files to dataBase!\nDuplicate Files Skipped: <code>{duplicate}</code>\nDeleted Messages Skipped: <code>{deleted}</code>\nNon-Media messages skipped: <code>{no_media + unsupported}</code>(Unsupported Media - `{unsupported}` )\nErrors Occurred: <code>{errors}</code>")
                     break
-
                 current += 1
-                if current % 20 == 0:
+                if current % 30 == 0:
                     can = [[InlineKeyboardButton('Cancel', callback_data='index_cancel')]]
                     reply = InlineKeyboardMarkup(can)
                     try:
                         await msg.edit_text(
-                            text=f"Total messages fetched: <code>{current}</code>\nTotal messages saved: <code>{total_files}</code>\nDuplicate Files Skipped: <code>{duplicate}</code>\nDeleted Messages Skipped: <code>{deleted}</code>\nNon-Media messages skipped: <code>{no_media + unsupported}</code>\nErrors Occurred: <code>{errors}</code>",
+                            text=f"Total messages fetched: <code>{current}</code>\nTotal messages saved: <code>{total_files}</code>\nDuplicate Files Skipped: <code>{duplicate}</code>\nDeleted Messages Skipped: <code>{deleted}</code>\nNon-Media messages skipped: <code>{no_media + unsupported}</code>(Unsupported Media - `{unsupported}` )\nErrors Occurred: <code>{errors}</code>",
                             reply_markup=reply
                         )
                     except MessageNotModified:
                         pass
 
-                try:
-                    if message.empty:
-                        deleted += 1
-                        continue
-                    elif not message.media:
-                        no_media += 1
-                        continue
-                    elif message.media not in [enums.MessageMediaType.VIDEO, enums.MessageMediaType.AUDIO, enums.MessageMediaType.DOCUMENT]:
-                        unsupported += 1
-                        continue
-
-                    media = getattr(message, message.media.value, None)
-                    if not media:
-                        unsupported += 1
-                        continue
-
-                    file_id, file_ref = unpack_new_file_id(media.file_id)
-                    file_name = clean_file_name(media.file_name)
-
-                    files_batch.append({
-                        '_id': file_id,
-                        'file_ref': file_ref,
-                        'file_name': file_name,
-                        'file_size': media.file_size,
-                        'file_type': message.media.value,
-                        'mime_type': media.mime_type,
-                        'caption': message.caption.html if message.caption else None,
-                        'file_id': file_id
-                    })
-
-                    if len(files_batch) >= batch_size:
-                        saved, dup = await save_files(files_batch)
-                        total_files += saved
-                        duplicate += dup
-                        files_batch.clear()
-                except Exception as e:
-                    logger.error(f"Error processing message {getattr(message, 'id', 'N/A')} in chat {chat}: {e}")
-                    errors += 1
+                if message.empty:
+                    deleted += 1
+                    continue
+                elif not message.media:
+                    no_media += 1
+                    continue
+                elif message.media not in [enums.MessageMediaType.VIDEO, enums.MessageMediaType.AUDIO, enums.MessageMediaType.DOCUMENT]:
+                    unsupported += 1
                     continue
 
+                media = getattr(message, message.media.value, None)
+                if not media:
+                    unsupported += 1
+                    continue
+
+                file_id, file_ref = unpack_new_file_id(media.file_id)
+                file_name = clean_file_name(media.file_name)
+
+                files_batch.append({
+                    '_id': file_id,
+                    'file_ref': file_ref,
+                    'file_name': file_name,
+                    'file_size': media.file_size,
+                    'file_type': message.media.value,
+                    'mime_type': media.mime_type,
+                    'caption': message.caption.html if message.caption else None,
+                    'file_id': file_id
+                })
+
+                if len(files_batch) >= batch_size:
+                    saved, dup = await save_files(files_batch)
+                    total_files += saved
+                    duplicate += dup
+                    files_batch.clear()
+
         except Exception as e:
-            logger.exception(f"A critical error occurred during indexing chat {chat}: {e}")
+            logger.exception(e)
             await msg.edit(f'Error: {e}')
-            indexing_interrupted = True
         finally:
             if files_batch:
                 saved, dup = await save_files(files_batch)
                 total_files += saved
                 duplicate += dup
-
-            if indexing_interrupted:
-                final_text = f'Indexing was interrupted by a critical error.\n\nSo far...\nSaved <code>{total_files}</code> files to database!\nDuplicate Files Skipped: <code>{duplicate}</code>\nDeleted Messages Skipped: <code>{deleted}</code>\nNon-Media messages skipped: <code>{no_media + unsupported}</code>\nErrors Occurred: <code>{errors}</code>'
-            else:
-                final_text = f'Successfully saved <code>{total_files}</code> files to database!\nDuplicate Files Skipped: <code>{duplicate}</code>\nDeleted Messages Skipped: <code>{deleted}</code>\nNon-Media messages skipped: <code>{no_media + unsupported}</code>\nErrors Occurred: <code>{errors}</code>'
-
-            await msg.edit(final_text)
+            await msg.edit(f'Succesfully saved <code>{total_files}</code> to dataBase!\nDuplicate Files Skipped: <code>{duplicate}</code>\nDeleted Messages Skipped: <code>{deleted}</code>\nNon-Media messages skipped: <code>{no_media + unsupported}</code>(Unsupported Media - `{unsupported}` )\nErrors Occurred: <code>{errors}</code>')
