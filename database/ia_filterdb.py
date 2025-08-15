@@ -8,7 +8,7 @@ from struct import pack
 from pyrogram.file_id import FileId
 from pymongo import MongoClient
 from pymongo.errors import DuplicateKeyError, BulkWriteError
-from info import FILE_DB_URI, SEC_FILE_DB_URI, DATABASE_NAME, COLLECTION_NAME, MULTIPLE_DATABASE
+from info import FILE_DB_URI, SEC_FILE_DB_URI, DATABASE_NAME, COLLECTION_NAME, MULTIPLE_DATABASE, USE_CAPTION_FILTER
 
 logger = logging.getLogger(__name__)
 
@@ -123,6 +123,38 @@ async def get_search_results(query, max_results=300):
     except Exception as e:
         logger.exception(f"Database search failed for query '{query}': {e}")
         return [], 0
+
+async def get_bad_files(query, file_type=None, use_filter=False):
+    """For given query return (results, next_offset)"""
+    query = query.strip()
+
+    if not query:
+        raw_pattern = '.'
+    elif ' ' not in query:
+        raw_pattern = rf'(\b|[.+-_]){query}(\b|[.+-_])'
+    else:
+        raw_pattern = query.replace(' ', r'.*[s.+-_]')
+
+    try:
+        regex = re.compile(raw_pattern, flags=re.IGNORECASE)
+    except re.error:
+        return [], 0
+
+    filter_criteria = {'file_name': regex}
+    if USE_CAPTION_FILTER:
+        filter_criteria = {'$or': [filter_criteria, {'caption': regex}]}
+
+    def count_documents(collection):
+        return collection.count_documents(filter_criteria)
+
+    total_results = (count_documents(col) + count_documents(sec_col) if MULTIPLE_DATABASE else count_documents(col))
+
+    def find_documents(collection):
+        return list(collection.find(filter_criteria))
+
+    files = (find_documents(col) + find_documents(sec_col) if MULTIPLE_DATABASE else find_documents(col))
+
+    return files, total_results
 
 async def get_file_details(query):
     return col.find_one({'_id': query}) or sec_col.find_one({'_id': query})
