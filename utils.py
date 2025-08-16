@@ -351,14 +351,27 @@ async def search_gagala(text):
     usr_agent = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) '
         'Chrome/61.0.3163.100 Safari/537.36'
-        }
+    }
     text = text.replace(" ", '+')
     url = f'https://www.google.com/search?q={text}'
-    response = requests.get(url, headers=usr_agent)
-    response.raise_for_status()
-    soup = BeautifulSoup(response.text, 'html.parser')
-    titles = soup.find_all( 'h3' )
-    return [title.getText() for title in titles]
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, headers=usr_agent) as response:
+                if response.status != 200:
+                    return []
+                soup = BeautifulSoup(await response.text(), 'html.parser')
+
+                # Try to find the "Did you mean" suggestion, which is more reliable.
+                suggestion_tag = soup.find('a', id='fprsl')
+                if suggestion_tag:
+                    return [suggestion_tag.text]
+
+                # Fallback to scraping result titles if no suggestion is found
+                titles = soup.find_all('h3')
+                return [title.getText() for title in titles[:5]]
+    except Exception as e:
+        logger.error(f"Error in search_gagala: {e}")
+        return []
 
 async def get_settings(group_id):
     settings = await db.get_settings(group_id)
