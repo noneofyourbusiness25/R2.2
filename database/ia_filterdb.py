@@ -127,8 +127,9 @@ def get_language_regex(language):
         return None
 
     tokens = LANGUAGES[language]
-    # Use a more flexible regex to catch languages in different formats
-    return r'(?:^|[\W_])(' + '|'.join(map(re.escape, tokens)) + r')(?:$|[\W_])'
+    # This pattern looks for the token either at the start/end of the string
+    # or surrounded by non-alphanumeric characters.
+    return r'(?:^|[^a-zA-Z0-9])(' + '|'.join(map(re.escape, tokens)) + r')(?:$|[^a-zA-Z0-9])'
 
 STOP_WORDS = ["download", "full", "hd", "send", "movie", "series"]
 
@@ -138,16 +139,23 @@ def normalize_and_generate_regex(query_text):
 
     # --- Parse Season/Episode ---
     se_pattern = None
+    # Try to match SXXEXX format
     se_match = re.search(r'\b(s|season)\s?(\d{1,2})[\s\._-]*(e|ep|episode)\s?(\d{1,3})\b', query_text, re.IGNORECASE)
     if se_match:
         season = int(se_match.group(2))
         episode = int(se_match.group(4))
-        # Create a flexible regex for SXXEXX format
         s_str, s0_str = f"{season:01d}", f"{season:02d}"
         e_str, e0_str = f"{episode:01d}", f"{episode:02d}"
-        # This handles S01E02, S01.E02, S01 EP 02, S01EP02 etc.
         se_pattern = f"S(0?{s_str}|{s0_str})[\\s\\._-]*?(E|EP)?[\\s\\._-]*?(0?{e_str}|{e0_str})"
         query_text = query_text.replace(se_match.group(0), '', 1)
+    else:
+        # Try to match season-only format (e.g., S01)
+        s_match = re.search(r'\b(s|season)\s?(\d{1,2})\b', query_text, re.IGNORECASE)
+        if s_match:
+            season = int(s_match.group(2))
+            s_str, s0_str = f"{season:01d}", f"{season:02d}"
+            se_pattern = f"S(0?{s_str}|{s0_str})"
+            query_text = query_text.replace(s_match.group(0), '', 1)
 
     # --- Parse Year ---
     year_pattern = None
@@ -176,28 +184,40 @@ def normalize_and_generate_regex(query_text):
 async def get_search_results(chat_id, query, file_type=None, max_results=10, offset=0, filter=False):
     """For given query return (results, next_offset, total_results)"""
 
-    query_for_pattern = query
+    start_time = time.monotonic()
+
+    raw_pattern = normalize_and_generate_regex(query)
+
+    try:
+        regex = re.compile(raw_pattern, flags=re.IGNORECASE)
+    except re.error:
+        regex = re.escape(query)
+
+    filter_criteria = {'$or': [{'file_name': regex}, {'caption': regex}]}
+
+    # Extract language from query for filtering
     language = None
+    language_token = None
     query_parts = query.lower().split()
     for part in query_parts:
         for lang, tokens in LANGUAGES.items():
             if part in tokens:
                 language = lang
-                # Remove all tokens for this language from the query_for_pattern
-                for token_to_remove in tokens:
-                    query_for_pattern = re.sub(r'\b' + re.escape(token_to_remove) + r'\b', '', query_for_pattern, flags=re.IGNORECASE)
+                language_token = part
                 break
         if language:
             break
 
-    start_time = time.monotonic()
+    if language_token:
+        query_parts.remove(language_token)
+        query = " ".join(query_parts)
 
-    raw_pattern = normalize_and_generate_regex(query_for_pattern)
+    raw_pattern = normalize_and_generate_regex(query)
 
     try:
         regex = re.compile(raw_pattern, flags=re.IGNORECASE)
     except re.error:
-        regex = re.escape(query_for_pattern)
+        regex = re.escape(query)
 
     filter_criteria = {'$or': [{'file_name': regex}, {'caption': regex}]}
 
@@ -211,8 +231,8 @@ async def get_search_results(chat_id, query, file_type=None, max_results=10, off
         }
     elif language == "english":
         all_other_lang_tokens = [token for lang, tokens in LANGUAGES.items() if lang != 'english' for token in tokens]
-        other_langs_regex_str = r'(?:^|[\W_])(' + '|'.join(map(re.escape, all_other_lang_tokens)) + r')(?:$|[\W_])'
-        other_langs_regex = re.compile(other_langs_regex_str, re.IGNORECASE)
+        other_langs_regex_pattern = r'(?:^|[^a-zA-Z0-9])(' + '|'.join(map(re.escape, all_other_lang_tokens)) + r')(?:$|[^a-zA-Z0-9])'
+        other_langs_regex = re.compile(other_langs_regex_pattern, re.IGNORECASE)
 
         filter_criteria = {
             '$and': [
@@ -285,65 +305,6 @@ async def get_search_results(chat_id, query, file_type=None, max_results=10, off
     )
 
     return files, next_offset, total_results
-
-
-async def get_all_results(chat_id, query):
-    """Fetches all documents matching a query, without pagination."""
-
-    query_for_pattern = query
-    language = None
-    query_parts = query.lower().split()
-    for part in query_parts:
-        for lang, tokens in LANGUAGES.items():
-            if part in tokens:
-                language = lang
-                for token_to_remove in tokens:
-                    query_for_pattern = re.sub(r'\b' + re.escape(token_to_remove) + r'\b', '', query_for_pattern, flags=re.IGNORECASE)
-                break
-        if language:
-            break
-
-    raw_pattern = normalize_and_generate_regex(query_for_pattern)
-
-    try:
-        regex = re.compile(raw_pattern, flags=re.IGNORECASE)
-    except re.error:
-        regex = re.escape(query_for_pattern)
-
-    filter_criteria = {'$or': [{'file_name': regex}, {'caption': regex}]}
-
-    if language and language != "english":
-        lang_regex = re.compile(get_language_regex(language), re.IGNORECASE)
-        filter_criteria = {
-            '$and': [
-                filter_criteria,
-                {'$or': [{'file_name': lang_regex}, {'caption': lang_regex}]}
-            ]
-        }
-    elif language == "english":
-        all_other_lang_tokens = [token for lang, tokens in LANGUAGES.items() if lang != 'english' for token in tokens]
-        other_langs_regex_str = r'(?:^|[\W_])(' + '|'.join(map(re.escape, all_other_lang_tokens)) + r')(?:$|[\W_])'
-        other_langs_regex = re.compile(other_langs_regex_str, re.IGNORECASE)
-        filter_criteria = {
-            '$and': [
-                filter_criteria,
-                {'$nor': [{'file_name': other_langs_regex}, {'caption': other_langs_regex}]}
-            ]
-        }
-
-    files = []
-    try:
-        cursor1 = col.find(filter_criteria)
-        for file in cursor1:
-            files.append(file)
-        if MULTIPLE_DATABASE:
-            cursor2 = sec_col.find(filter_criteria)
-            for file in cursor2:
-                files.append(file)
-    except Exception as e:
-        logger.exception(f"Get all results failed | query='{query}' | pattern='{raw_pattern}'")
-
-    return files
 
 
 async def get_bad_files(query, file_type=None, use_filter=False):
