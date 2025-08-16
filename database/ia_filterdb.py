@@ -287,6 +287,65 @@ async def get_search_results(chat_id, query, file_type=None, max_results=10, off
     return files, next_offset, total_results
 
 
+async def get_all_results(chat_id, query):
+    """Fetches all documents matching a query, without pagination."""
+
+    query_for_pattern = query
+    language = None
+    query_parts = query.lower().split()
+    for part in query_parts:
+        for lang, tokens in LANGUAGES.items():
+            if part in tokens:
+                language = lang
+                for token_to_remove in tokens:
+                    query_for_pattern = re.sub(r'\b' + re.escape(token_to_remove) + r'\b', '', query_for_pattern, flags=re.IGNORECASE)
+                break
+        if language:
+            break
+
+    raw_pattern = normalize_and_generate_regex(query_for_pattern)
+
+    try:
+        regex = re.compile(raw_pattern, flags=re.IGNORECASE)
+    except re.error:
+        regex = re.escape(query_for_pattern)
+
+    filter_criteria = {'$or': [{'file_name': regex}, {'caption': regex}]}
+
+    if language and language != "english":
+        lang_regex = re.compile(get_language_regex(language), re.IGNORECASE)
+        filter_criteria = {
+            '$and': [
+                filter_criteria,
+                {'$or': [{'file_name': lang_regex}, {'caption': lang_regex}]}
+            ]
+        }
+    elif language == "english":
+        all_other_lang_tokens = [token for lang, tokens in LANGUAGES.items() if lang != 'english' for token in tokens]
+        other_langs_regex_str = r'(?:^|[\W_])(' + '|'.join(map(re.escape, all_other_lang_tokens)) + r')(?:$|[\W_])'
+        other_langs_regex = re.compile(other_langs_regex_str, re.IGNORECASE)
+        filter_criteria = {
+            '$and': [
+                filter_criteria,
+                {'$nor': [{'file_name': other_langs_regex}, {'caption': other_langs_regex}]}
+            ]
+        }
+
+    files = []
+    try:
+        cursor1 = col.find(filter_criteria)
+        for file in cursor1:
+            files.append(file)
+        if MULTIPLE_DATABASE:
+            cursor2 = sec_col.find(filter_criteria)
+            for file in cursor2:
+                files.append(file)
+    except Exception as e:
+        logger.exception(f"Get all results failed | query='{query}' | pattern='{raw_pattern}'")
+
+    return files
+
+
 async def get_bad_files(query, file_type=None, use_filter=False):
     """For given query return (results, next_offset)"""
     query = query.strip()
