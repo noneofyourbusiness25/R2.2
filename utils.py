@@ -46,6 +46,24 @@ def extract_season_episode(text):
 
     return None, None
 
+def extract_s_e_numbers(text):
+    # Pattern to match SXXEXX, Season X Episode Y, and XxYY formats
+    # It also handles cases where only the season is present
+    pattern = r'\b(?:(s|season)\s?(\d{1,2})[\s\._-]*?(?:(e|ep|episode)\s?(\d{1,3}))?|(\d{1,2})x(\d{1,3}))\b'
+    match = re.search(pattern, text, re.IGNORECASE)
+
+    if match:
+        if match.group(1) is not None: # Matched SXXEXX format
+            season = int(match.group(2))
+            episode = int(match.group(4)) if match.group(4) else None
+            return season, episode
+        else: # Matched XxYY format
+            season = int(match.group(5))
+            episode = int(match.group(6))
+            return season, episode
+
+    return None, None
+
 def extract_quality(text):
     match = re.search(r'\b(360p|480p|720p|1080p|2160p)\b', text, re.IGNORECASE)
     if match:

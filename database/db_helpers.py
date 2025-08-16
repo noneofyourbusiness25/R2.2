@@ -1,5 +1,5 @@
 import re
-from utils import extract_year, extract_season_episode, extract_languages
+from utils import extract_year, extract_s_e_numbers, extract_languages
 
 def get_available_seasons(results):
     """Extracts unique season numbers from a list of file results."""
@@ -9,13 +9,9 @@ def get_available_seasons(results):
         if result.get('caption'):
             text_to_parse += " " + result.get('caption')
 
-        season_episode_match, _ = extract_season_episode(text_to_parse)
-        if season_episode_match:
-            # "Season X Episode Y" -> "Season X" -> "X"
-            season_str = season_episode_match.split(' Episode ')[0]
-            season_num = re.findall(r'\d+', season_str)
-            if season_num:
-                seasons.add(int(season_num[0]))
+        season, _ = extract_s_e_numbers(text_to_parse)
+        if season is not None:
+            seasons.add(season)
     return sorted(list(seasons))
 
 def get_available_episodes(results, season_number):
@@ -26,17 +22,9 @@ def get_available_episodes(results, season_number):
         if result.get('caption'):
             text_to_parse += " " + result.get('caption')
 
-        season_episode_match, _ = extract_season_episode(text_to_parse)
-        if season_episode_match:
-            # "Season X Episode Y"
-            try:
-                season_part, episode_part = season_episode_match.split(' Episode ')
-                current_season_num = int(re.findall(r'\d+', season_part)[0])
-                if current_season_num == season_number:
-                    episode_num = int(re.findall(r'\d+', episode_part)[0])
-                    episodes.add(episode_num)
-            except (ValueError, IndexError):
-                continue
+        season, episode = extract_s_e_numbers(text_to_parse)
+        if season == season_number and episode is not None:
+            episodes.add(episode)
     return sorted(list(episodes))
 
 def get_available_years(results):
