@@ -97,20 +97,25 @@ async def next_page(bot, query):
 
     temp.GETALL[key] = files
 
-    btn = [
-        [InlineKeyboardButton(f"📌 Title: {search.upper()}", callback_data="pages")],
-        [InlineKeyboardButton(f"📁 {total} Results  found", callback_data=f"filter_results#{key}")]
-    ]
+    btn = []
+    for file in files:
+        file_id = file.get("file_id")
+        title = file.get("file_name", "Unknown Title")
+        size = get_size(file.get("file_size", 0))
+        btn.append([InlineKeyboardButton(text=f"📄 {title} ({size})", callback_data=f"file#{file_id}")])
 
-    if n_offset:
-        btn.append(
-            [InlineKeyboardButton("⌫ ʙᴀᴄᴋ", callback_data=f"next_{req}_{key}_{int(offset)-10}" if offset else f"next_0_{key}_0"),
-             InlineKeyboardButton(f"{math.ceil(int(offset)/10)+1} / {math.ceil(total/10)}", callback_data="pages"),
-             InlineKeyboardButton("ɴᴇxᴛ ➪", callback_data=f"next_{req}_{key}_{n_offset}")]
-        )
+    btn.append([
+        InlineKeyboardButton("⌫ ʙᴀᴄᴋ", callback_data=f"next_0_{key}_{int(offset)-10}" if offset else f"next_0_{key}_0"),
+        InlineKeyboardButton(f"{math.ceil(int(offset)/10)+1} / {math.ceil(total/10)}", callback_data="pages"),
+        InlineKeyboardButton("ɴᴇxᴛ ➪", callback_data=f"next_0_{key}_{n_offset}" if n_offset else "next_0_0_0")
+    ])
+    btn.append([InlineKeyboardButton("🔎 Filter Results", callback_data=f"filter_results#{key}")])
 
     try:
-        await query.message.edit_text(text=f"Select your movie from the buttons below. This message will be deleted in 5 minutes to avoid spam.", reply_markup=InlineKeyboardMarkup(btn))
+        await query.message.edit_text(
+            text=f"<b>Here are the results for your query. This message will self-destruct in 10 minutes.</b>",
+            reply_markup=InlineKeyboardMarkup(btn)
+        )
     except MessageNotModified:
         pass
 
@@ -276,19 +281,25 @@ async def auto_filter(client, msg, message, reply_msg, ai_search, spoll=None):
     key = os.urandom(6).hex()
     temp.ACTIVE_SEARCHES[key] = clean_query
 
-    btn = [[InlineKeyboardButton(f"📌 Title: {clean_query.upper()}", callback_data="pages")],
-           [InlineKeyboardButton(f"📁 {total_results} Results  found", callback_data=f"filter_results#{key}")]]
+    btn = []
+    for file in files:
+        file_id = file.get("file_id")
+        title = file.get("file_name", "Unknown Title")
+        size = get_size(file.get("file_size", 0))
+        btn.append([InlineKeyboardButton(text=f"📄 {title} ({size})", callback_data=f"file#{file_id}")])
 
-    temp.GETALL[key] = files
+    btn.append([InlineKeyboardButton("🔎 Filter Results", callback_data=f"filter_results#{key}")])
 
     if offset != 0:
         btn.append(
-            [InlineKeyboardButton("𝐏𝐀𝐆𝐄", callback_data="pages"), InlineKeyboardButton(f"1/{math.ceil(total_results/10)}", callback_data="pages"), InlineKeyboardButton("𝐍𝐄𝐗𝐓 ➪", callback_data=f"next_0_{key}_{offset}")]
+            [InlineKeyboardButton("⌫ ʙᴀᴄᴋ", callback_data=f"next_0_{key}_{int(offset)-10}" if offset else "next_0_0_0"),
+             InlineKeyboardButton(f"{math.ceil(int(offset)/10)+1} / {math.ceil(total_results/10)}", callback_data="pages"),
+             InlineKeyboardButton("ɴᴇxᴛ ➪", callback_data=f"next_0_{key}_{offset}" if offset else "next_0_0_0")]
         )
 
     try:
         await reply_msg.edit_text(
-            text=f"Select your movie from the buttons below:",
+            text=f"<b>Here are the results for your query. This message will self-destruct in 10 minutes for privacy.</b>",
             reply_markup=InlineKeyboardMarkup(btn)
         )
     except Exception as e:
