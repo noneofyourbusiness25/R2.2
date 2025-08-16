@@ -176,27 +176,30 @@ def normalize_and_generate_regex(query_text):
 async def get_search_results(chat_id, query, file_type=None, max_results=10, offset=0, filter=False):
     """For given query return (results, next_offset, total_results)"""
 
-    start_time = time.monotonic()
-
-    raw_pattern = normalize_and_generate_regex(query)
-
-    try:
-        regex = re.compile(raw_pattern, flags=re.IGNORECASE)
-    except re.error:
-        regex = re.escape(query)
-
-    filter_criteria = {'$or': [{'file_name': regex}, {'caption': regex}]}
-
-    # Extract language from query for filtering
+    query_for_pattern = query
     language = None
     query_parts = query.lower().split()
     for part in query_parts:
         for lang, tokens in LANGUAGES.items():
             if part in tokens:
                 language = lang
+                # Remove all tokens for this language from the query_for_pattern
+                for token_to_remove in tokens:
+                    query_for_pattern = re.sub(r'\b' + re.escape(token_to_remove) + r'\b', '', query_for_pattern, flags=re.IGNORECASE)
                 break
         if language:
             break
+
+    start_time = time.monotonic()
+
+    raw_pattern = normalize_and_generate_regex(query_for_pattern)
+
+    try:
+        regex = re.compile(raw_pattern, flags=re.IGNORECASE)
+    except re.error:
+        regex = re.escape(query_for_pattern)
+
+    filter_criteria = {'$or': [{'file_name': regex}, {'caption': regex}]}
 
     if language and language != "english":
         lang_regex = re.compile(get_language_regex(language), re.IGNORECASE)
