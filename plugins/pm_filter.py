@@ -12,7 +12,7 @@ from pyrogram.errors import FloodWait, UserIsBlocked, MessageNotModified, PeerId
 from pyrogram.errors.exceptions.bad_request_400 import MediaEmpty, PhotoInvalidDimensions, WebpageMediaEmpty
 from utils import get_size, is_subscribed, pub_is_subscribed, get_poster, search_gagala, temp, get_settings, save_group_settings, get_shortlink, get_tutorial, send_all, get_cap
 from database.users_chats_db import db
-from database.ia_filterdb import col, sec_col, db as vjdb, sec_db, get_file_details, get_search_results, get_bad_files, LANGUAGES, get_available_languages
+from database.ia_filterdb import col, sec_col, db as vjdb, sec_db, get_file_details, get_search_results, get_bad_files, LANGUAGES
 from database.filters_mdb import del_all, find_filter, get_filters
 from database.connections_mdb import mydb, active_connection, all_connections, delete_connection, if_active, make_active, make_inactive
 from database.gfilters_mdb import find_gfilter, get_gfilters, del_allg
@@ -29,6 +29,19 @@ BUTTONS0 = {}
 BUTTONS1 = {}
 BUTTONS2 = {}
 temp.ACTIVE_SEARCHES = {}
+
+def parse_s_e_from_name(name):
+    """Parses season and episode numbers from a file name."""
+    name = name.lower()
+    # Regular expression to find SxxExx or Sxx EPxx patterns
+    match = re.search(r'\b(s|season)\s?(\d{1,2})[\s\._-]*(e|ep|episode)\s?(\d{1,3})\b', name)
+    if match:
+        return int(match.group(2)), int(match.group(4))
+    # Fallback for Sxx only
+    match = re.search(r'\b(s|season)\s?(\d{1,2})\b', name)
+    if match:
+        return int(match.group(2)), None
+    return None, None
 
 @Client.on_message(filters.group & filters.text & filters.incoming)
 async def give_filter(client, message):
@@ -97,23 +110,45 @@ async def next_page(bot, query):
 
     temp.GETALL[key] = files
 
-    btn = []
+    processed_files = []
     for file in files:
+        season, episode = parse_s_e_from_name(file.get("file_name", ""))
+        processed_files.append({'file': file, 'season': season, 'episode': episode})
+
+    processed_files.sort(key=lambda x: (x['season'] is None, x['episode'] is None, x['season'], x['episode']))
+
+    btn = []
+    for item in processed_files:
+        file = item['file']
         file_id = file.get("file_id")
         title = file.get("file_name", "Unknown Title")
         size = get_size(file.get("file_size", 0))
-        btn.append([InlineKeyboardButton(text=f"📄 {title} ({size})", callback_data=f"file#{file_id}")])
 
-    btn.append([
-        InlineKeyboardButton("⌫ ʙᴀᴄᴋ", callback_data=f"next_0_{key}_{int(offset)-10}" if offset else f"next_0_{key}_0"),
-        InlineKeyboardButton(f"{math.ceil(int(offset)/10)+1} / {math.ceil(total/10)}", callback_data="pages"),
-        InlineKeyboardButton("ɴᴇxᴛ ➪", callback_data=f"next_0_{key}_{n_offset}" if n_offset else "next_0_0_0")
-    ])
+        s_e_info = ""
+        if item['season'] is not None:
+            s_e_info = f"S{item['season']:02d}"
+            if item['episode'] is not None:
+                s_e_info += f"E{item['episode']:02d}"
+
+        button_text = f"[{size}]"
+        if s_e_info:
+            button_text += f" {s_e_info}"
+        button_text += f" {title}"
+
+        btn.append([InlineKeyboardButton(text=button_text, callback_data=f"file#{file_id}")])
+
+    if n_offset:
+        btn.append([
+            InlineKeyboardButton("⌫ ʙᴀᴄᴋ", callback_data=f"next_0_{key}_{int(offset)-10}" if offset else f"next_0_{key}_0"),
+            InlineKeyboardButton(f"{math.ceil(int(offset)/10)+1} / {math.ceil(total/10)}", callback_data="pages"),
+            InlineKeyboardButton("ɴᴇxᴛ ➪", callback_data=f"next_0_{key}_{n_offset}")
+        ])
+
     btn.append([InlineKeyboardButton("🔎 Filter Results", callback_data=f"filter_results#{key}")])
 
     try:
         await query.message.edit_text(
-            text=f"<b>Here are the results for your query. This message will self-destruct in 10 minutes.</b>",
+            text=f"<b>Here are the results for your query.\nThis message will self-destruct in 10 minutes for privacy.</b>",
             reply_markup=InlineKeyboardMarkup(btn)
         )
     except MessageNotModified:
@@ -162,22 +197,10 @@ async def movies_cb_handler(client: Client, query: CallbackQuery):
 @Client.on_callback_query(filters.regex(r"^year#"))
 async def year_select_cb_handler(client: Client, query: CallbackQuery):
     _, year, key = query.data.split("#")
-    search = temp.ACTIVE_SEARCHES.get(key)
-    if not search:
-        return await query.answer("⚠️ This button has expired.", show_alert=True)
-
-    search_query = f"{search} {year}"
-    languages = await get_available_languages(search_query)
-
-    if not languages:
-        return await query.answer("No files found for the selected year.", show_alert=True)
-
-    if len(languages) == 1:
-        return await lang_select_cb_handler(client, query, languages[0], "movie", year)
 
     buttons = [
         InlineKeyboardButton(f"🌐 {lang.capitalize()}", callback_data=f"lang#{lang}#movie#{year}#None#{key}")
-        for lang in languages
+        for lang in LANGUAGES
     ]
     btn = [buttons[i:i+2] for i in range(0, len(buttons), 2)]
     btn.append([InlineKeyboardButton("⬅️ Back", callback_data=f"movies#{key}")])
@@ -205,22 +228,10 @@ async def season_select_cb_handler(client: Client, query: CallbackQuery):
 @Client.on_callback_query(filters.regex(r"^episode#"))
 async def episode_select_cb_handler(client: Client, query: CallbackQuery):
     _, season, episode, key = query.data.split("#")
-    search = temp.ACTIVE_SEARCHES.get(key)
-    if not search:
-        return await query.answer("⚠️ This button has expired.", show_alert=True)
-
-    search_query = f"{search} s{int(season):02d}e{int(episode):02d}"
-    languages = await get_available_languages(search_query)
-
-    if not languages:
-        return await query.answer("No files found for the selected season/episode.", show_alert=True)
-
-    if len(languages) == 1:
-        return await lang_select_cb_handler(client, query, languages[0], "series", season, episode)
 
     buttons = [
         InlineKeyboardButton(f"🌐 {lang.capitalize()}", callback_data=f"lang#{lang}#series#{season}#{episode}#{key}")
-        for lang in languages
+        for lang in LANGUAGES
     ]
     btn = [buttons[i:i+2] for i in range(0, len(buttons), 2)]
     btn.append([InlineKeyboardButton("⬅️ Back", callback_data=f"season#{season}#{key}")])
@@ -280,26 +291,43 @@ async def auto_filter(client, msg, message, reply_msg, ai_search, spoll=None):
 
     key = os.urandom(6).hex()
     temp.ACTIVE_SEARCHES[key] = clean_query
+    temp.GETALL[key] = files
+
+    processed_files = []
+    for file in files:
+        season, episode = parse_s_e_from_name(file.get("file_name", ""))
+        processed_files.append({'file': file, 'season': season, 'episode': episode})
+
+    processed_files.sort(key=lambda x: (x['season'] is None, x['episode'] is None, x['season'], x['episode']))
 
     btn = []
-    for file in files:
+    for item in processed_files:
+        file = item['file']
         file_id = file.get("file_id")
         title = file.get("file_name", "Unknown Title")
         size = get_size(file.get("file_size", 0))
-        btn.append([InlineKeyboardButton(text=f"📄 {title} ({size})", callback_data=f"file#{file_id}")])
+
+        s_e_info = ""
+        if item['season'] is not None:
+            s_e_info = f"S{item['season']:02d}"
+            if item['episode'] is not None:
+                s_e_info += f"E{item['episode']:02d}"
+
+        button_text = f"[{size}]"
+        if s_e_info:
+            button_text += f" {s_e_info}"
+        button_text += f" {title}"
+
+        btn.append([InlineKeyboardButton(text=button_text, callback_data=f"file#{file_id}")])
+
+    if total_results > len(files):
+         btn.append([InlineKeyboardButton("ɴᴇxᴛ ➪", callback_data=f"next_0_{key}_{10}")])
 
     btn.append([InlineKeyboardButton("🔎 Filter Results", callback_data=f"filter_results#{key}")])
 
-    if offset != 0:
-        btn.append(
-            [InlineKeyboardButton("⌫ ʙᴀᴄᴋ", callback_data=f"next_0_{key}_{int(offset)-10}" if offset else "next_0_0_0"),
-             InlineKeyboardButton(f"{math.ceil(int(offset)/10)+1} / {math.ceil(total_results/10)}", callback_data="pages"),
-             InlineKeyboardButton("ɴᴇxᴛ ➪", callback_data=f"next_0_{key}_{offset}" if offset else "next_0_0_0")]
-        )
-
     try:
         await reply_msg.edit_text(
-            text=f"<b>Here are the results for your query. This message will self-destruct in 10 minutes for privacy.</b>",
+            text=f"<b>Here are the results for your query.\nThis message will self-destruct in 10 minutes for privacy.</b>",
             reply_markup=InlineKeyboardMarkup(btn)
         )
     except Exception as e:

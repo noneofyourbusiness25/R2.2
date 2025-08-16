@@ -338,69 +338,6 @@ async def get_bad_files(query, file_type=None, use_filter=False):
     return files, total_results
 
 
-async def get_available_languages(query):
-    """
-    Finds all available languages for a given query by checking each language.
-    """
-    available_languages = []
-
-    # Base query for the title
-    raw_pattern, _ = normalize_and_generate_regex(query)
-    try:
-        base_regex = re.compile(raw_pattern, flags=re.IGNORECASE)
-    except re.error:
-        base_regex = re.compile(re.escape(query), flags=re.IGNORECASE)
-    base_filter = {'$or': [{'file_name': base_regex}, {'caption': base_regex}]}
-
-    # Check for each non-English language
-    for lang, tokens in LANGUAGES.items():
-        if lang == 'english':
-            continue
-
-        lang_regex_pattern = get_language_regex(lang)
-        lang_regex = re.compile(lang_regex_pattern, re.IGNORECASE)
-
-        filter_criteria = {
-            '$and': [
-                base_filter,
-                {'$or': [{'file_name': lang_regex}, {'caption': lang_regex}]}
-            ]
-        }
-
-        count = col.count_documents(filter_criteria)
-        if MULTIPLE_DATABASE:
-            count += sec_col.count_documents(filter_criteria)
-
-        if count > 0:
-            available_languages.append(lang)
-
-    # Now, check for English files (those that don't match any other language)
-    all_other_lang_tokens = [token for lang, tokens in LANGUAGES.items() if lang != 'english' for token in tokens]
-    other_langs_regex_pattern = r'(?:^|[^a-zA-Z0-9])(' + '|'.join(map(re.escape, all_other_lang_tokens)) + r')(?:$|[^a-zA-Z0-9])'
-    other_langs_regex = re.compile(other_langs_regex_pattern, re.IGNORECASE)
-
-    english_filter = {
-        '$and': [
-            base_filter,
-            {
-                '$nor': [
-                    {'file_name': other_langs_regex},
-                    {'caption': other_langs_regex}
-                ]
-            }
-        ]
-    }
-
-    count = col.count_documents(english_filter)
-    if MULTIPLE_DATABASE:
-        count += sec_col.count_documents(english_filter)
-
-    if count > 0:
-        available_languages.append('english')
-
-    return sorted(available_languages)
-
-
 async def get_file_details(query):
     return col.find_one({'file_id': query}) or sec_col.find_one({'file_id': query})
 
