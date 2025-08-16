@@ -597,7 +597,7 @@ async def auto_filter(client, msg, message, reply_msg, ai_search, spoll=None):
     btn.insert(0, [
         InlineKeyboardButton("𝐒𝐞𝐧𝐝 𝐀𝐥𝐥", callback_data=f"sendfiles#{encoded_search}")
     ])
-    cache_key = query.message.id if spoll else reply_msg.id
+    cache_key = reply_msg.id
     RESULTS_CACHE[cache_key] = {'results': files, 'search': encoded_search}
 
     btn.insert(1, [
