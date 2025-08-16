@@ -110,29 +110,22 @@ async def next_page(bot, query):
 
     temp.GETALL[key] = files
 
-    processed_files = []
-    for file in files:
-        season, episode = parse_s_e_from_name(file.get("file_name", ""))
-        processed_files.append({'file': file, 'season': season, 'episode': episode})
-
-    processed_files.sort(key=lambda x: (x['season'] is None, x['episode'] is None, x['season'], x['episode']))
-
     btn = []
-    for item in processed_files:
-        file = item['file']
+    for file in files:
         file_id = file.get("file_id")
         title = file.get("file_name", "Unknown Title")
         size = get_size(file.get("file_size", 0))
 
+        season, episode = parse_s_e_from_name(title)
         s_e_info = ""
-        if item['season'] is not None:
-            s_e_info = f"S{item['season']:02d}"
-            if item['episode'] is not None:
-                s_e_info += f"E{item['episode']:02d}"
+        if season is not None:
+            s_e_info = f"S{season:02d}"
+            if episode is not None:
+                s_e_info += f"E{episode:02d}"
 
         button_text = f"[{size}]"
         if s_e_info:
-            button_text += f" {s_e_info}"
+            button_text += f" [{s_e_info}]"
         button_text += f" {title}"
 
         btn.append([InlineKeyboardButton(text=button_text, callback_data=f"file#{file_id}")])
@@ -293,29 +286,22 @@ async def auto_filter(client, msg, message, reply_msg, ai_search, spoll=None):
     temp.ACTIVE_SEARCHES[key] = clean_query
     temp.GETALL[key] = files
 
-    processed_files = []
-    for file in files:
-        season, episode = parse_s_e_from_name(file.get("file_name", ""))
-        processed_files.append({'file': file, 'season': season, 'episode': episode})
-
-    processed_files.sort(key=lambda x: (x['season'] is None, x['episode'] is None, x['season'], x['episode']))
-
     btn = []
-    for item in processed_files:
-        file = item['file']
+    for file in files:
         file_id = file.get("file_id")
         title = file.get("file_name", "Unknown Title")
         size = get_size(file.get("file_size", 0))
 
+        season, episode = parse_s_e_from_name(title)
         s_e_info = ""
-        if item['season'] is not None:
-            s_e_info = f"S{item['season']:02d}"
-            if item['episode'] is not None:
-                s_e_info += f"E{item['episode']:02d}"
+        if season is not None:
+            s_e_info = f"S{season:02d}"
+            if episode is not None:
+                s_e_info += f"E{episode:02d}"
 
         button_text = f"[{size}]"
         if s_e_info:
-            button_text += f" {s_e_info}"
+            button_text += f" [{s_e_info}]"
         button_text += f" {title}"
 
         btn.append([InlineKeyboardButton(text=button_text, callback_data=f"file#{file_id}")])
