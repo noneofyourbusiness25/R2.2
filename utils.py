@@ -48,9 +48,10 @@ def extract_duration(text):
 def extract_languages(text):
     found_languages = set()
     for lang, tokens in LANGUAGES.items():
-        for token in tokens:
-            if re.search(r'\b' + re.escape(token) + r'\b', text, re.IGNORECASE):
-                found_languages.add(lang.title())
+        # Use a more flexible regex to catch languages in different formats
+        pattern = r'(?:^|[\W_])(' + '|'.join(map(re.escape, tokens)) + r')(?:$|[\W_])'
+        if re.search(pattern, text, re.IGNORECASE):
+            found_languages.add(lang.title())
     return sorted(list(found_languages)) if found_languages else None
 
 def extract_subtitles(text):
