@@ -128,7 +128,7 @@ def get_language_regex(language):
 
     tokens = LANGUAGES[language]
     # This pattern looks for the token either at the start/end of the string
-    # or surrounded by non-alphanumeric characters.
+    # or surrounded by non-alphanumeric characters. This is more flexible than \b.
     return r'(?:^|[^a-zA-Z0-9])(' + '|'.join(map(re.escape, tokens)) + r')(?:$|[^a-zA-Z0-9])'
 
 STOP_WORDS = ["download", "full", "hd", "send", "movie", "series"]
@@ -139,7 +139,7 @@ def normalize_and_generate_regex(query_text):
 
     # --- Parse Season/Episode ---
     se_pattern = None
-    # Try to match SXXEXX format
+    # Try to match SXXEXX format first, as it's more specific
     se_match = re.search(r'\b(s|season)\s?(\d{1,2})[\s\._-]*(e|ep|episode)\s?(\d{1,3})\b', query_text, re.IGNORECASE)
     if se_match:
         season = int(se_match.group(2))
@@ -149,7 +149,7 @@ def normalize_and_generate_regex(query_text):
         se_pattern = f"S(0?{s_str}|{s0_str})[\\s\\._-]*?(E|EP)?[\\s\\._-]*?(0?{e_str}|{e0_str})"
         query_text = query_text.replace(se_match.group(0), '', 1)
     else:
-        # Try to match season-only format (e.g., S01)
+        # If not found, try to match season-only format (e.g., S01)
         s_match = re.search(r'\b(s|season)\s?(\d{1,2})\b', query_text, re.IGNORECASE)
         if s_match:
             season = int(s_match.group(2))
@@ -179,23 +179,18 @@ def normalize_and_generate_regex(query_text):
     # Join all parts with '.*' to find them in order, separated by anything.
     final_regex = '.*'.join(all_parts)
 
-    return final_regex if final_regex else ".*"
+    # The cleaned query is the title parts joined by a space
+    cleaned_query = ' '.join(title_parts)
+
+    return (final_regex, cleaned_query) if final_regex else (".*", cleaned_query)
 
 async def get_search_results(chat_id, query, file_type=None, max_results=10, offset=0, filter=False):
     """For given query return (results, next_offset, total_results)"""
 
     start_time = time.monotonic()
 
-    raw_pattern = normalize_and_generate_regex(query)
-
-    try:
-        regex = re.compile(raw_pattern, flags=re.IGNORECASE)
-    except re.error:
-        regex = re.escape(query)
-
-    filter_criteria = {'$or': [{'file_name': regex}, {'caption': regex}]}
-
-    # Extract language from query for filtering
+    # --- Language Processing ---
+    # This needs to be done once, before the main query is built.
     language = None
     language_token = None
     query_parts = query.lower().split()
@@ -208,11 +203,13 @@ async def get_search_results(chat_id, query, file_type=None, max_results=10, off
         if language:
             break
 
+    # If a language is found, remove it from the query to get a clean title query
     if language_token:
         query_parts.remove(language_token)
         query = " ".join(query_parts)
 
-    raw_pattern = normalize_and_generate_regex(query)
+    # --- Main Query Processing ---
+    raw_pattern, clean_query = normalize_and_generate_regex(query)
 
     try:
         regex = re.compile(raw_pattern, flags=re.IGNORECASE)
@@ -221,6 +218,8 @@ async def get_search_results(chat_id, query, file_type=None, max_results=10, off
 
     filter_criteria = {'$or': [{'file_name': regex}, {'caption': regex}]}
 
+    # --- Language Filtering ---
+    # Apply the language filter on top of the main filter criteria
     if language and language != "english":
         lang_regex = re.compile(get_language_regex(language), re.IGNORECASE)
         filter_criteria = {
@@ -304,7 +303,7 @@ async def get_search_results(chat_id, query, file_type=None, max_results=10, off
         duration_ms,
     )
 
-    return files, next_offset, total_results
+    return files, next_offset, total_results, clean_query
 
 
 async def get_bad_files(query, file_type=None, use_filter=False):

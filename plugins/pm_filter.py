@@ -65,7 +65,7 @@ async def give_filter(client, message):
     else: #a better logic to avoid repeated lines of code in auto_filter function
         search = message.text
         logger.info(f"Support group quick count | chat_id={message.chat.id} | query='{search.lower()}'")
-        temp_files, temp_offset, total_results = await get_search_results(chat_id=message.chat.id, query=search.lower(), offset=0, filter=True)
+        temp_files, temp_offset, total_results, _ = await get_search_results(chat_id=message.chat.id, query=search.lower(), offset=0, filter=True)
         if total_results == 0:
             logger.error(f"Support group ZERO RESULTS | chat_id={message.chat.id} | query='{search.lower()}'")
             return
@@ -96,7 +96,7 @@ async def next_page(bot, query):
         offset = 0
     search = base64.urlsafe_b64decode(key).decode()
 
-    files, n_offset, total = await get_search_results(query.message.chat.id, search, offset=offset, filter=True)
+    files, n_offset, total, _ = await get_search_results(query.message.chat.id, search, offset=offset, filter=True)
     logger.info(f"next_page | chat_id={query.message.chat.id} | user_id={query.from_user.id} | search='{search}' | offset_in={offset} | next_offset_raw={n_offset} | total={total} | files_returned={len(files) if files else 0}")
     try:
         n_offset = int(n_offset)
@@ -438,13 +438,13 @@ async def lang_select_cb_handler(client: Client, query: CallbackQuery):
     search = f"{search} {lang}"
 
     # Final search
-    files, offset, total_results = await get_search_results(query.message.chat.id, search, offset=0, filter=True)
+    files, offset, total_results, clean_query = await get_search_results(query.message.chat.id, search, offset=0, filter=True)
     if not files:
         await query.answer("🚫 𝗡𝗼 𝗙𝗶𝗹𝗲 𝗪𝗲𝗿𝗲 𝗙𝗼𝘂𝗻𝗱 🚫", show_alert=1)
         return
 
     # a bit of a hack to reuse the existing display logic
-    await auto_filter(client, search, query.message.reply_to_message, query.message, True, spoll=(search, files, offset, total_results))
+    await auto_filter(client, search, query.message.reply_to_message, query.message, True, spoll=(search, files, offset, total_results, clean_query))
 
 async def spell_check_helper(client, message, reply_msg):
     query = message.text
@@ -471,10 +471,10 @@ async def spell_check_helper(client, message, reply_msg):
 async def auto_filter(client, msg, message, reply_msg, ai_search, spoll=None):
     imdb = None
     if spoll:
-        search, files, offset, total_results = spoll
+        search, files, offset, total_results, clean_query = spoll
     else:
         search = msg
-        files, offset, total_results = await get_search_results(message.chat.id, search, offset=0, filter=True)
+        files, offset, total_results, clean_query = await get_search_results(message.chat.id, search, offset=0, filter=True)
 
     if not files:
         if SPELL_CHECK_REPLY:
@@ -483,7 +483,7 @@ async def auto_filter(client, msg, message, reply_msg, ai_search, spoll=None):
             return await reply_msg.edit("🤷‍♂️ No results found 🤷‍♂️")
 
     settings = await get_settings(message.chat.id)
-    encoded_search = base64.urlsafe_b64encode(search.encode()).decode()
+    encoded_search = base64.urlsafe_b64encode(clean_query.encode()).decode()
 
     if settings["button"]:
         btn = [
@@ -679,9 +679,9 @@ async def advantage_spoll_choker(bot, query):
     if gl == False:
         k = await manual_filters(bot, query.message, text=movie)
         if k == False:
-            files, offset, total_results = await get_search_results(query.message.chat.id, movie, offset=0, filter=True)
+            files, offset, total_results, clean_query = await get_search_results(query.message.chat.id, movie, offset=0, filter=True)
             if files:
-                k = (movie, files, offset, total_results)
+                k = (movie, files, offset, total_results, clean_query)
                 ai_search = True
                 reply_msg = await query.message.edit_text(f"<b><i>Searching For {movie} 🔍</i></b>")
                 await auto_filter(bot, movie, query, reply_msg, ai_search, k)
