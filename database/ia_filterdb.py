@@ -168,9 +168,11 @@ def normalize_and_generate_regex(query_text):
     # The remaining parts of the query are treated as title keywords
     title_parts = query_text.strip().split()
 
-    # --- Build a simple, ordered regex ---
-    # This is much faster than lookaheads.
-    all_parts = [re.escape(part) for part in title_parts if part]
+    # --- Build a simple, ordered regex with word boundaries for the title ---
+    # This is much faster than lookaheads and more precise.
+    title_regex_parts = [r'\b' + re.escape(part) + r'\b' for part in title_parts if part]
+    all_parts = title_regex_parts
+
     if year_pattern:
         all_parts.append(year_pattern)
     if se_pattern:

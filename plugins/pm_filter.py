@@ -43,6 +43,40 @@ def parse_s_e_from_name(name):
         return int(match.group(2)), None
     return None, None
 
+def calculate_match_score(file_name, query):
+    """
+    Calculates a score based on how closely the file name matches the query.
+    Lower scores are better.
+    """
+    # Define stop words to ignore in the file name
+    stop_words = [
+        '1080p', '720p', '480p', 'bluray', 'x264', 'x265', 'webrip', 'hdrip',
+        'hdcam', 'dvdrip', 'dual', 'audio', 'multi'
+    ]
+    # Add all language tokens from the LANGUAGES dict to stop words
+    for lang_tokens in LANGUAGES.values():
+        stop_words.extend(lang_tokens)
+
+    # Clean the file name
+    # Remove S/E and year patterns
+    name = re.sub(r'\b(s|season)\s?\d{1,2}[\s\._-]*(e|ep|episode)\s?\d{1,3}\b', '', file_name, flags=re.IGNORECASE)
+    name = re.sub(r'\b(19|20)\d{2}\b', '', name)
+    # Remove any characters that are not letters, numbers, or spaces
+    name = re.sub(r'[^\w\s]', '', name)
+
+    # Tokenize and filter out stop words
+    name_words = [word for word in name.lower().split() if word not in stop_words and not word.isdigit()]
+
+    # Clean and tokenize the query
+    query_words = query.lower().split()
+
+    # Calculate the score as the number of extra words in the file name
+    score = len(name_words) - len(query_words)
+
+    # We only want to penalize extra words, so the score cannot be negative
+    return max(0, score)
+
+
 @Client.on_message(filters.group & filters.text & filters.incoming)
 async def give_filter(client, message):
     if message.chat.id != SUPPORT_CHAT_ID:
@@ -107,6 +141,16 @@ async def next_page(bot, query):
     files, n_offset, total, _ = await get_search_results(query.message.chat.id, search, offset=offset, filter=True)
     if not files:
         return await query.answer("No more files found on this page.", show_alert=True)
+
+    # Score and sort the files
+    scored_files = []
+    for file in files:
+        file_name = file.get("file_name", "")
+        score = calculate_match_score(file_name, search) # Use `search` which is the clean query from ACTIVE_SEARCHES
+        scored_files.append({'file': file, 'score': score})
+
+    scored_files.sort(key=lambda x: x['score'])
+    files = [item['file'] for item in scored_files]
 
     temp.GETALL[key] = files
 
@@ -284,6 +328,17 @@ async def auto_filter(client, msg, message, reply_msg, ai_search, spoll=None):
 
     key = os.urandom(6).hex()
     temp.ACTIVE_SEARCHES[key] = clean_query
+
+    # Score and sort the files
+    scored_files = []
+    for file in files:
+        file_name = file.get("file_name", "")
+        score = calculate_match_score(file_name, clean_query)
+        scored_files.append({'file': file, 'score': score})
+
+    scored_files.sort(key=lambda x: x['score'])
+    files = [item['file'] for item in scored_files]
+
     temp.GETALL[key] = files
 
     btn = []
