@@ -51,18 +51,12 @@ async def give_filter(client, message):
         if manual == False:
             settings = await get_settings(message.chat.id)
             try:
-                if settings['auto_ffilter']:
+                if settings.get('auto_ffilter'):
                     ai_search = True
                     reply_msg = await message.reply_text(f"<b><i>Searching For {message.text} 🔍</i></b>")
                     await auto_filter(client, message.text, message, reply_msg, ai_search)
-            except KeyError:
-                grpid = await active_connection(str(message.from_user.id))
-                await save_group_settings(grpid, 'auto_ffilter', True)
-                settings = await get_settings(message.chat.id)
-                if settings['auto_ffilter']:
-                    ai_search = True
-                    reply_msg = await message.reply_text(f"<b><i>Searching For {message.text} 🔍</i></b>")
-                    await auto_filter(client, message.text, message, reply_msg, ai_search)
+            except Exception as e:
+                logger.exception(f"[GIVE_FILTER] An unexpected error occurred: {e}")
     else: #a better logic to avoid repeated lines of code in auto_filter function
         search = message.text
         logger.info(f"Support group quick count | chat_id={message.chat.id} | query='{search.lower()}'")
@@ -174,7 +168,7 @@ async def year_select_cb_handler(client: Client, query: CallbackQuery):
         return await query.answer("No files found for the selected year.", show_alert=True)
 
     if len(languages) == 1:
-        return await lang_select_cb_handler(client, query, languages[0], "movie", year, None)
+        return await lang_select_cb_handler(client, query, languages[0], "movie", year)
 
     buttons = [
         InlineKeyboardButton(f"🌐 {lang.capitalize()}", callback_data=f"lang#{lang}#movie#{year}#None#{key}")
@@ -231,7 +225,11 @@ async def episode_select_cb_handler(client: Client, query: CallbackQuery):
 @Client.on_callback_query(filters.regex(r"^lang#"))
 async def lang_select_cb_handler(client: Client, query, lang=None, media_type=None, media_filter=None, media_filter2=None):
     if lang is None: # Called from button
-        _, lang, media_type, media_filter, media_filter2, key = query.data.split("#")
+        try:
+            _, lang, media_type, media_filter, media_filter2, key = query.data.split("#")
+        except:
+            _, lang, media_type, media_filter, key = query.data.split("#")
+            media_filter2 = "None"
     else: # Called directly
         key = query.data.split("#")[-1]
 
@@ -248,7 +246,7 @@ async def lang_select_cb_handler(client: Client, query, lang=None, media_type=No
     if not files:
         return await query.answer("🚫 𝗡𝗼 𝗙𝗶𝗹𝗲 𝗪𝗲𝗿𝗲 𝗙𝗼𝘂𝗻𝗱 🚫", show_alert=1)
 
-    await auto_filter(client, search_query, query.message, query.message, True, spoll=(search_query, files, offset, total_results, clean_query))
+    await auto_filter(client, search_query, query, query.message, True, spoll=(search_query, files, offset, total_results, clean_query))
 
 async def spell_check_helper(client, message, reply_msg):
     query = message.text
