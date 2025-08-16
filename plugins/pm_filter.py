@@ -89,6 +89,7 @@ async def pm_text(bot, message):
 @Client.on_callback_query(filters.regex(r"^next"))
 async def next_page(bot, query):
     ident, req, key, offset = query.data.split("_")
+    cache_key = int(key)
     curr_time = datetime.now(pytz.timezone('Asia/Kolkata')).time()
     if int(req) not in [query.from_user.id, 0]:
         return await query.answer(script.ALRT_TXT.format(query.from_user.first_name), show_alert=True)
@@ -96,8 +97,13 @@ async def next_page(bot, query):
         offset = int(offset)
     except:
         offset = 0
-    search = base64.urlsafe_b64decode(key).decode()
 
+    cached_data = RESULTS_CACHE.get(cache_key)
+    if not cached_data:
+        await query.answer("Sorry, the results expired. Please start the search again.", show_alert=True)
+        return
+
+    search = base64.urlsafe_b64decode(cached_data['search']).decode()
     files, n_offset, total = await get_search_results(query.message.chat.id, search, offset=offset, filter=True)
     logger.info(f"next_page | chat_id={query.message.chat.id} | user_id={query.from_user.id} | search='{search}' | offset_in={offset} | next_offset_raw={n_offset} | total={total} | files_returned={len(files) if files else 0}")
     try:
@@ -606,7 +612,7 @@ async def auto_filter(client, msg, message, reply_msg, ai_search, spoll=None):
 
     if offset != 0:
         btn.append(
-            [InlineKeyboardButton("𝐏𝐀𝐆𝐄", callback_data="pages"), InlineKeyboardButton(f"1/{math.ceil(total_results/10)}", callback_data="pages"), InlineKeyboardButton("𝐍𝐄𝐗𝐓 ➪", callback_data=f"next_0_{encoded_search}_{offset}")]
+            [InlineKeyboardButton("𝐏𝐀𝐆𝐄", callback_data="pages"), InlineKeyboardButton(f"1/{math.ceil(total_results/10)}", callback_data="pages"), InlineKeyboardButton("𝐍𝐄𝐗𝐓 ➪", callback_data=f"next_0_{cache_key}_{offset}")]
         )
 
     if AUTO_FILTER_REPLY_MSG:
