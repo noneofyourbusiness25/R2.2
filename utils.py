@@ -47,20 +47,31 @@ def extract_season_episode(text):
     return None, None
 
 def extract_s_e_numbers(text):
-    # Pattern to match SXXEXX, Season X Episode Y, and XxYY formats
-    # It also handles cases where only the season is present
-    pattern = r'\b(?:(s|season)\s?(\d{1,2})[\s\._-]*?(?:(e|ep|episode)\s?(\d{1,3}))?|(\d{1,2})x(\d{1,3}))\b'
-    match = re.search(pattern, text, re.IGNORECASE)
-
+    # Pattern 1: SXXEXX format (e.g., S01E02, s01.e02)
+    match = re.search(r'[Ss](\d{1,2})[\s._-]*[Ee](\d{1,3})', text)
     if match:
-        if match.group(1) is not None: # Matched SXXEXX format
-            season = int(match.group(2))
-            episode = int(match.group(4)) if match.group(4) else None
-            return season, episode
-        else: # Matched XxYY format
-            season = int(match.group(5))
-            episode = int(match.group(6))
-            return season, episode
+        season = int(match.group(1))
+        episode = int(match.group(2))
+        return season, episode
+
+    # Pattern 2: XxYY format (e.g., 1x02, 12x03)
+    match = re.search(r'(\d{1,2})x(\d{1,3})', text)
+    if match:
+        season = int(match.group(1))
+        episode = int(match.group(2))
+        return season, episode
+
+    # Pattern 3: "Season XX" format (e.g., Season 01, Season-2)
+    match = re.search(r'[Ss]eason[\s._-]*(\d{1,2})', text)
+    if match:
+        season = int(match.group(1))
+        return season, None # No episode info in this format
+
+    # Pattern 4: "SXX" format (e.g., S01, s2) - last resort for season only
+    match = re.search(r'\b[Ss](\d{1,2})\b', text)
+    if match:
+        season = int(match.group(1))
+        return season, None # No episode info
 
     return None, None
 
