@@ -127,7 +127,8 @@ def get_language_regex(language):
         return None
 
     tokens = LANGUAGES[language]
-    return r'\b(' + '|'.join(tokens) + r')\b'
+    # Use a more flexible regex to catch languages in different formats
+    return r'(?:^|[\W_])(' + '|'.join(map(re.escape, tokens)) + r')(?:$|[\W_])'
 
 STOP_WORDS = ["download", "full", "hd", "send", "movie", "series"]
 
@@ -251,7 +252,8 @@ async def get_search_results(chat_id, query, file_type=None, max_results=10, off
         }
     elif language == "english":
         all_other_lang_tokens = [token for lang, tokens in LANGUAGES.items() if lang != 'english' for token in tokens]
-        other_langs_regex = re.compile(r'\b(' + '|'.join(all_other_lang_tokens) + r')\b', re.IGNORECASE)
+        other_langs_regex_str = r'(?:^|[\W_])(' + '|'.join(map(re.escape, all_other_lang_tokens)) + r')(?:$|[\W_])'
+        other_langs_regex = re.compile(other_langs_regex_str, re.IGNORECASE)
 
         filter_criteria = {
             '$and': [
