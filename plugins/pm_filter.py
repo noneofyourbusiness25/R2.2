@@ -238,7 +238,7 @@ async def filter_results_cb_handler(client: Client, query: CallbackQuery):
     btn = [
         [InlineKeyboardButton("🎬 Movies", callback_data=f"movies#{cache_key}")],
         [InlineKeyboardButton("📺 Series", callback_data=f"series#{cache_key}")],
-        [InlineKeyboardButton("⬅️ Back to Home", callback_data=f"next_0_{encoded_search}_0")]
+        [InlineKeyboardButton("⬅️ Back to Home", callback_data=f"next_0_{cache_key}_0")]
     ]
 
     await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(btn))
