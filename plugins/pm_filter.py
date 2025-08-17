@@ -23,6 +23,13 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 lock = asyncio.Lock()
 
+async def schedule_message_deletion(message, time_in_seconds):
+    await asyncio.sleep(time_in_seconds)
+    try:
+        await message.delete()
+    except Exception as e:
+        logger.info(f"Couldn't delete message after timeout: {e}")
+
 BUTTON = {}
 BUTTONS = {}
 BUTTONS0 = {}
@@ -134,9 +141,16 @@ async def next_page(bot, query):
     except:
         offset = 0
 
-    search = temp.ACTIVE_SEARCHES.get(key)
-    if not search:
+    search_data = temp.ACTIVE_SEARCHES.get(key)
+    if not search_data:
         return await query.answer("⚠️ This button has expired.", show_alert=True)
+
+    try:
+        if query.from_user.id != search_data['user_id']:
+            return await query.answer(script.ALRT_TXT.format(query.from_user.first_name), show_alert=True)
+        search = search_data['query']
+    except (TypeError, KeyError):
+        search = search_data
 
     files, n_offset, total, _ = await get_search_results(query.message.chat.id, search, offset=offset, filter=True)
     if not files:
@@ -146,7 +160,7 @@ async def next_page(bot, query):
     scored_files = []
     for file in files:
         file_name = file.get("file_name", "")
-        score = calculate_match_score(file_name, search) # Use `search` which is the clean query from ACTIVE_SEARCHES
+        score = calculate_match_score(file_name, search)
         scored_files.append({'file': file, 'score': score})
 
     scored_files.sort(key=lambda x: x['score'])
@@ -172,7 +186,7 @@ async def next_page(bot, query):
             button_text += f" [{s_e_info}]"
         button_text += f" {title}"
 
-        btn.append([InlineKeyboardButton(text=button_text, callback_data=f"file#{file_id}")])
+        btn.append([InlineKeyboardButton(text=button_text, callback_data=f"file#{key}#{file_id}")])
 
     if n_offset:
         btn.append([
@@ -188,12 +202,21 @@ async def next_page(bot, query):
             text=f"<b>Here are the results for your query.\nThis message will self-destruct in 10 minutes for privacy.</b>",
             reply_markup=InlineKeyboardMarkup(btn)
         )
+        asyncio.create_task(schedule_message_deletion(query.message, 600))
     except MessageNotModified:
         pass
 
 @Client.on_callback_query(filters.regex(r"^filter_results#"))
 async def filter_results_cb_handler(client: Client, query: CallbackQuery):
     _, key = query.data.split("#")
+    search_data = temp.ACTIVE_SEARCHES.get(key)
+    if not search_data:
+        return await query.answer("⚠️ This button has expired.", show_alert=True)
+    try:
+        if query.from_user.id != search_data['user_id']:
+            return await query.answer(script.ALRT_TXT.format(query.from_user.first_name), show_alert=True)
+    except (TypeError, KeyError):
+        pass
     btn = [
         [InlineKeyboardButton("🎬 Movies", callback_data=f"movies#{key}")],
         [InlineKeyboardButton("📺 Series", callback_data=f"series#{key}")],
@@ -210,6 +233,15 @@ async def movies_cb_handler(client: Client, query: CallbackQuery):
     except:
         _, key = query.data.split("#")
         page = 1
+
+    search_data = temp.ACTIVE_SEARCHES.get(key)
+    if not search_data:
+        return await query.answer("⚠️ This button has expired.", show_alert=True)
+    try:
+        if query.from_user.id != search_data['user_id']:
+            return await query.answer(script.ALRT_TXT.format(query.from_user.first_name), show_alert=True)
+    except (TypeError, KeyError):
+        pass
 
     years_per_page = 18
     years = [str(y) for y in range(date.today().year, 1899, -1)]
@@ -235,6 +267,15 @@ async def movies_cb_handler(client: Client, query: CallbackQuery):
 async def year_select_cb_handler(client: Client, query: CallbackQuery):
     _, year, key = query.data.split("#")
 
+    search_data = temp.ACTIVE_SEARCHES.get(key)
+    if not search_data:
+        return await query.answer("⚠️ This button has expired.", show_alert=True)
+    try:
+        if query.from_user.id != search_data['user_id']:
+            return await query.answer(script.ALRT_TXT.format(query.from_user.first_name), show_alert=True)
+    except (TypeError, KeyError):
+        pass
+
     buttons = [
         InlineKeyboardButton(f"🌐 {lang.capitalize()}", callback_data=f"lang#{lang}#movie#{year}#None#{key}")
         for lang in LANGUAGES
@@ -247,6 +288,15 @@ async def year_select_cb_handler(client: Client, query: CallbackQuery):
 @Client.on_callback_query(filters.regex(r"^series#"))
 async def series_cb_handler(client: Client, query: CallbackQuery):
     _, key = query.data.split("#")
+
+    search_data = temp.ACTIVE_SEARCHES.get(key)
+    if not search_data:
+        return await query.answer("⚠️ This button has expired.", show_alert=True)
+    try:
+        if query.from_user.id != search_data['user_id']:
+            return await query.answer(script.ALRT_TXT.format(query.from_user.first_name), show_alert=True)
+    except (TypeError, KeyError):
+        pass
     seasons = [str(s) for s in range(1, 21)]
     btn = [InlineKeyboardButton(f"📁 Season {s}", callback_data=f"season#{s}#{key}") for s in seasons]
     btn = [btn[i:i+2] for i in range(0, len(btn), 2)]
@@ -256,6 +306,15 @@ async def series_cb_handler(client: Client, query: CallbackQuery):
 @Client.on_callback_query(filters.regex(r"^season#"))
 async def season_select_cb_handler(client: Client, query: CallbackQuery):
     _, season, key = query.data.split("#")
+
+    search_data = temp.ACTIVE_SEARCHES.get(key)
+    if not search_data:
+        return await query.answer("⚠️ This button has expired.", show_alert=True)
+    try:
+        if query.from_user.id != search_data['user_id']:
+            return await query.answer(script.ALRT_TXT.format(query.from_user.first_name), show_alert=True)
+    except (TypeError, KeyError):
+        pass
     episodes = [str(e) for e in range(1, 21)] # Assuming max 20 episodes
     btn = [InlineKeyboardButton(f"Episode {e}", callback_data=f"episode#{season}#{e}#{key}") for e in episodes]
     btn = [btn[i:i+3] for i in range(0, len(btn), 3)]
@@ -265,6 +324,15 @@ async def season_select_cb_handler(client: Client, query: CallbackQuery):
 @Client.on_callback_query(filters.regex(r"^episode#"))
 async def episode_select_cb_handler(client: Client, query: CallbackQuery):
     _, season, episode, key = query.data.split("#")
+
+    search_data = temp.ACTIVE_SEARCHES.get(key)
+    if not search_data:
+        return await query.answer("⚠️ This button has expired.", show_alert=True)
+    try:
+        if query.from_user.id != search_data['user_id']:
+            return await query.answer(script.ALRT_TXT.format(query.from_user.first_name), show_alert=True)
+    except (TypeError, KeyError):
+        pass
 
     buttons = [
         InlineKeyboardButton(f"🌐 {lang.capitalize()}", callback_data=f"lang#{lang}#series#{season}#{episode}#{key}")
@@ -286,9 +354,16 @@ async def lang_select_cb_handler(client: Client, query, lang=None, media_type=No
     else: # Called directly
         key = query.data.split("#")[-1]
 
-    search = temp.ACTIVE_SEARCHES.get(key)
-    if not search:
+    search_data = temp.ACTIVE_SEARCHES.get(key)
+    if not search_data:
         return await query.answer("⚠️ This button has expired.", show_alert=True)
+
+    try:
+        if query.from_user.id != search_data['user_id']:
+            return await query.answer(script.ALRT_TXT.format(query.from_user.first_name), show_alert=True)
+        search = search_data['query']
+    except (TypeError, KeyError):
+        search = search_data
 
     if media_type == "movie":
         search_query = f"{search} {media_filter} {lang}" # media_filter is year
@@ -327,7 +402,7 @@ async def auto_filter(client, msg, message, reply_msg, ai_search, spoll=None):
             return await reply_msg.edit("🤷‍♂️ No results found 🤷‍♂️")
 
     key = os.urandom(6).hex()
-    temp.ACTIVE_SEARCHES[key] = clean_query
+    temp.ACTIVE_SEARCHES[key] = {'query': clean_query, 'user_id': message.from_user.id}
 
     # Score and sort the files
     scored_files = []
@@ -359,7 +434,7 @@ async def auto_filter(client, msg, message, reply_msg, ai_search, spoll=None):
             button_text += f" [{s_e_info}]"
         button_text += f" {title}"
 
-        btn.append([InlineKeyboardButton(text=button_text, callback_data=f"file#{file_id}")])
+        btn.append([InlineKeyboardButton(text=button_text, callback_data=f"file#{key}#{file_id}")])
 
     if total_results > len(files):
          btn.append([InlineKeyboardButton("ɴᴇxᴛ ➪", callback_data=f"next_0_{key}_{10}")])
@@ -371,6 +446,7 @@ async def auto_filter(client, msg, message, reply_msg, ai_search, spoll=None):
             text=f"<b>Here are the results for your query.\nThis message will self-destruct in 10 minutes for privacy.</b>",
             reply_markup=InlineKeyboardMarkup(btn)
         )
+        asyncio.create_task(schedule_message_deletion(reply_msg, 600))
     except Exception as e:
         logger.exception(f"Error editing message in auto_filter: {e}")
 
@@ -620,7 +696,22 @@ async def cb_handler(client: Client, query: CallbackQuery):
             alert = alert.replace("\\n", "\n").replace("\\t", "\t")
             await query.answer(alert, show_alert=True)
     if query.data.startswith("file"):
-        ident, file_id = query.data.split("#")
+        data_parts = query.data.split("#")
+        if len(data_parts) == 3: # new format: file#key#file_id
+            ident, key, file_id = data_parts
+            search_data = temp.ACTIVE_SEARCHES.get(key)
+            if not search_data:
+                return await query.answer("⚠️ This button has expired.", show_alert=True)
+            try:
+                if query.from_user.id != search_data['user_id']:
+                    return await query.answer(script.ALRT_TXT.format(query.from_user.first_name), show_alert=True)
+            except (TypeError, KeyError):
+                pass
+        elif len(data_parts) == 2: # old format: file#file_id
+            ident, file_id = data_parts
+        else:
+            return
+
         files_ = await get_file_details(file_id)
         if not files_:
             return await query.answer('Nᴏ sᴜᴄʜ ғɪʟᴇ ᴇxɪsᴛ.')
