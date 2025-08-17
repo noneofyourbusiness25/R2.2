@@ -186,6 +186,7 @@ async def index_files_to_db(lst_msg_id, chat, msg, bot):
                     fetched_messages += 1
 
                     if fetched_messages % 30 == 0:
+                        temp.CURRENT = current
                         can = [[InlineKeyboardButton('Cancel', callback_data='index_cancel')]]
                         reply = InlineKeyboardMarkup(can)
                         try:

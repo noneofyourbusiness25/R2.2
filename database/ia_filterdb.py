@@ -361,11 +361,10 @@ def unpack_new_file_id(new_file_id):
     decoded = FileId.decode(new_file_id)
     file_id = encode_file_id(
         pack(
-            "<iiqq",
+            "<iiq",
             int(decoded.file_type),
             decoded.dc_id,
             decoded.media_id,
-            decoded.access_hash
         )
     )
     return file_id, decoded.file_reference
