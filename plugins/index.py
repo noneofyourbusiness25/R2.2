@@ -7,7 +7,7 @@ from utils import temp
 from info import ADMINS
 from pyrogram import Client, filters, enums
 from pyrogram.errors import FloodWait, MessageNotModified
-from pyrogram.errors.exceptions.bad_request_400 import ChannelInvalid, ChatAdminRequired, UsernameInvalid, UsernameNotModified, ChannelPrivate
+from pyrogram.errors.exceptions.bad_request_400 import ChannelInvalid, ChatAdminRequired, UsernameInvalid, UsernameNotModified, ChannelPrivate, MessageIdInvalid
 from info import INDEX_REQ_CHANNEL as LOG_CHANNEL
 from database.ia_filterdb import save_files, unpack_new_file_id, clean_file_name
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
@@ -42,12 +42,15 @@ async def index_files_cb(bot, query):
             f'Your Submission for indexing {chat} has been accepted by our moderators and will be added soon.',
             reply_to_message_id=int(lst_msg_id)
         )
-    await msg.edit(
-        "Starting Indexing...",
-        reply_markup=InlineKeyboardMarkup(
-            [[InlineKeyboardButton('Cancel', callback_data='index_cancel')]]
+    try:
+        await msg.edit(
+            "Starting Indexing...",
+            reply_markup=InlineKeyboardMarkup(
+                [[InlineKeyboardButton('Cancel', callback_data='index_cancel')]]
+            )
         )
-    )
+    except MessageIdInvalid:
+        logger.warning("Message to edit was deleted.")
     try:
         chat = int(chat)
     except:
@@ -57,7 +60,10 @@ async def index_files_cb(bot, query):
     try:
         await bot.get_messages(chat, 1)
     except Exception as e:
-        await msg.edit(f"Could not fetch messages from the channel.\n\n**Error:** `{e}`\n\nPlease make sure the bot is an admin in the channel and has the permission to read message history.")
+        try:
+            await msg.edit(f"Could not fetch messages from the channel.\n\n**Error:** `{e}`\n\nPlease make sure the bot is an admin in the channel and has the permission to read message history.")
+        except MessageIdInvalid:
+            logger.warning("Message to edit was deleted.")
         return
 
     await index_files_to_db(int(lst_msg_id), chat, msg, bot)
@@ -170,7 +176,10 @@ async def index_files_to_db(lst_msg_id, chat, msg, bot):
                             total_files += saved
                             duplicate += dup
                             files_batch.clear()
-                        await msg.edit(f"Successfully Cancelled!!\n\nSaved <code>{total_files}</code> files to dataBase!\nDuplicate Files Skipped: <code>{duplicate}</code>\nDeleted Messages Skipped: <code>{deleted}</code>\nNon-Media messages skipped: <code>{no_media + unsupported}</code>(Unsupported Media - `{unsupported}` )\nErrors Occurred: <code>{errors}</code>")
+                        try:
+                            await msg.edit(f"Successfully Cancelled!!\n\nSaved <code>{total_files}</code> files to dataBase!\nDuplicate Files Skipped: <code>{duplicate}</code>\nDeleted Messages Skipped: <code>{deleted}</code>\nNon-Media messages skipped: <code>{no_media + unsupported}</code>(Unsupported Media - `{unsupported}` )\nErrors Occurred: <code>{errors}</code>")
+                        except MessageIdInvalid:
+                            logger.warning("Message to edit was deleted.")
                         break
 
                     current = message.id
@@ -184,7 +193,7 @@ async def index_files_to_db(lst_msg_id, chat, msg, bot):
                                 text=f"Total messages fetched: <code>{fetched_messages}</code>\nTotal messages saved: <code>{total_files}</code>\nDuplicate Files Skipped: <code>{duplicate}</code>\nDeleted Messages Skipped: <code>{deleted}</code>\nNon-Media messages skipped: <code>{no_media + unsupported}</code>(Unsupported Media - `{unsupported}` )\nErrors Occurred: <code>{errors}</code>",
                                 reply_markup=reply
                             )
-                        except MessageNotModified:
+                        except (MessageNotModified, MessageIdInvalid):
                             pass
 
                     if message.empty:
@@ -228,17 +237,26 @@ async def index_files_to_db(lst_msg_id, chat, msg, bot):
             except ChannelPrivate:
                 retries += 1
                 logger.warning(f"ChannelPrivate error at message ID {current}. Retrying in 60 seconds... (Attempt {retries}/{max_retries})")
-                await msg.edit(f"Telegram is slowing me down. Waiting 60 seconds... (Attempt {retries}/{max_retries})")
+                try:
+                    await msg.edit(f"Telegram is slowing me down. Waiting 60 seconds... (Attempt {retries}/{max_retries})")
+                except MessageIdInvalid:
+                    logger.warning("Message to edit was deleted.")
                 await asyncio.sleep(60)
 
             except Exception as e:
                 logger.exception(f"An error occurred at message ID {current}: {e}")
-                await msg.edit(f'Error: {e}')
+                try:
+                    await msg.edit(f'Error: {e}')
+                except MessageIdInvalid:
+                    logger.warning("Message to edit was deleted.")
                 error_occured = True
                 break
 
         if retries >= max_retries:
-            await msg.edit("Failed to index files after multiple retries due to repeated channel access errors. Please try again later.")
+            try:
+                await msg.edit("Failed to index files after multiple retries due to repeated channel access errors. Please try again later.")
+            except MessageIdInvalid:
+                logger.warning("Message to edit was deleted.")
             error_occured = True
 
         if not error_occured:
@@ -246,4 +264,7 @@ async def index_files_to_db(lst_msg_id, chat, msg, bot):
                 saved, dup = await save_files(files_batch)
                 total_files += saved
                 duplicate += dup
-            await msg.edit(f'Succesfully saved <code>{total_files}</code> to dataBase!\nDuplicate Files Skipped: <code>{duplicate}</code>\nDeleted Messages Skipped: <code>{deleted}</code>\nNon-Media messages skipped: <code>{no_media + unsupported}</code>(Unsupported Media - `{unsupported}` )\nErrors Occurred: <code>{errors}</code>')
+            try:
+                await msg.edit(f'Succesfully saved <code>{total_files}</code> to dataBase!\nDuplicate Files Skipped: <code>{duplicate}</code>\nDeleted Messages Skipped: <code>{deleted}</code>\nNon-Media messages skipped: <code>{no_media + unsupported}</code>(Unsupported Media - `{unsupported}` )\nErrors Occurred: <code>{errors}</code>')
+            except MessageIdInvalid:
+                logger.warning("Message to edit was deleted.")
