@@ -146,13 +146,11 @@ async def index_files_to_db(lst_msg_id, chat, msg, bot):
     fetched_messages = 0
     files_batch = []
     batch_size = 200
-    max_retries = 3
-    retries = 0
     error_occured = False
     current = await db.get_last_indexed_id()
 
     async with lock:
-        while retries < max_retries:
+        while True:
             try:
                 temp.CANCEL = False
                 logger.info(f"Starting indexing from message ID: {current}")
@@ -223,13 +221,10 @@ async def index_files_to_db(lst_msg_id, chat, msg, bot):
                 break
 
             except ChannelPrivate:
-                retries += 1
-                logger.warning(f"ChannelPrivate error at message ID {current}. Retrying in 60 seconds... (Attempt {retries}/{max_retries})")
-                try:
-                    await msg.edit(f"Telegram is slowing me down. Waiting 60 seconds... (Attempt {retries}/{max_retries})")
-                except MessageIdInvalid:
-                    logger.warning("Message to edit was deleted.")
-                await asyncio.sleep(60)
+                logger.warning(f"Skipping inaccessible message ID {current} due to ChannelPrivate error.")
+                current += 1
+                await db.update_last_indexed_id(current)
+                continue
 
             except Exception as e:
                 logger.exception(f"An error occurred at message ID {current}: {e}")
@@ -239,13 +234,6 @@ async def index_files_to_db(lst_msg_id, chat, msg, bot):
                     logger.warning("Message to edit was deleted.")
                 error_occured = True
                 break
-
-        if retries >= max_retries:
-            try:
-                await msg.edit("Failed to index files after multiple retries due to repeated channel access errors. Please try again later.")
-            except MessageIdInvalid:
-                logger.warning("Message to edit was deleted.")
-            error_occured = True
 
         if not error_occured:
             if files_batch:
