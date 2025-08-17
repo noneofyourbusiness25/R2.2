@@ -745,6 +745,7 @@ async def cb_handler(client: Client, query: CallbackQuery):
             await query.answer(url=f"https://telegram.me/{temp.U_NAME}?start={ident}_{file_id}")
         except Exception as e:
             await query.answer(url=f"https://telegram.me/{temp.U_NAME}?start={ident}_{file_id}")
+        return
     elif query.data.startswith("sendfiles"):
         ident, key = query.data.split("#")
         settings = await get_settings(query.message.chat.id)
@@ -761,6 +762,7 @@ async def cb_handler(client: Client, query: CallbackQuery):
         except Exception as e:
             logger.exception(e)
             await query.answer(url=f"https://telegram.me/{temp.U_NAME}?start=sendfiles4_{key}")
+        return
     elif query.data.startswith("unmuteme"):
         ident, userid = query.data.split("#")
         user_id = query.from_user.id
@@ -783,11 +785,13 @@ async def cb_handler(client: Client, query: CallbackQuery):
         if not files_:
             return await query.answer('Nᴏ sᴜᴄʜ ғɪʟᴇ ᴇxɪsᴛ.')
         await query.answer(url=f"https://telegram.me/{temp.U_NAME}?start=file_{file_id}")
+        return
     elif query.data.startswith("checksub"):
         if AUTH_CHANNEL and not await is_subscribed(client, query):
             return await query.answer("Jᴏɪɴ ᴏᴜʀ Bᴀᴄᴋ-ᴜᴘ ᴄʜᴀɴɴᴇʟ ᴍᴀʜɴ! 😒", show_alert=True)
         ident, kk, file_id = query.data.split("#")
         await query.answer(url=f"https://t.me/{temp.U_NAME}?start={kk}_{file_id}")
+        return
     elif query.data == "pages":
         await query.answer()
     elif query.data.startswith("send_fsall"):
