@@ -7,7 +7,7 @@ from utils import temp
 from info import ADMINS
 from pyrogram import Client, filters, enums
 from pyrogram.errors import FloodWait, MessageNotModified
-from pyrogram.errors.exceptions.bad_request_400 import ChannelInvalid, ChatAdminRequired, UsernameInvalid, UsernameNotModified
+from pyrogram.errors.exceptions.bad_request_400 import ChannelInvalid, ChatAdminRequired, UsernameInvalid, UsernameNotModified, ChannelPrivate
 from info import INDEX_REQ_CHANNEL as LOG_CHANNEL
 from database.ia_filterdb import save_files, unpack_new_file_id, clean_file_name
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
@@ -150,73 +150,98 @@ async def index_files_to_db(lst_msg_id, chat, msg, bot):
     deleted = 0
     no_media = 0
     unsupported = 0
+    fetched_messages = 0
     files_batch = []
-    batch_size = 200  # Adjust batch size as needed
+    batch_size = 200
+    max_retries = 3
+    retries = 0
+    error_occured = False
+    current = temp.CURRENT
 
     async with lock:
-        try:
-            current = temp.CURRENT
-            temp.CANCEL = False
-            async for message in bot.iter_messages(chat, lst_msg_id, temp.CURRENT):
-                if temp.CANCEL:
-                    if files_batch:
+        while retries < max_retries:
+            try:
+                temp.CANCEL = False
+                logger.info(f"Starting indexing from message ID: {current}")
+                async for message in bot.iter_messages(chat, lst_msg_id, current):
+                    if temp.CANCEL:
+                        if files_batch:
+                            saved, dup = await save_files(files_batch)
+                            total_files += saved
+                            duplicate += dup
+                            files_batch.clear()
+                        await msg.edit(f"Successfully Cancelled!!\n\nSaved <code>{total_files}</code> files to dataBase!\nDuplicate Files Skipped: <code>{duplicate}</code>\nDeleted Messages Skipped: <code>{deleted}</code>\nNon-Media messages skipped: <code>{no_media + unsupported}</code>(Unsupported Media - `{unsupported}` )\nErrors Occurred: <code>{errors}</code>")
+                        break
+
+                    current = message.id
+                    fetched_messages += 1
+
+                    if fetched_messages % 30 == 0:
+                        can = [[InlineKeyboardButton('Cancel', callback_data='index_cancel')]]
+                        reply = InlineKeyboardMarkup(can)
+                        try:
+                            await msg.edit_text(
+                                text=f"Total messages fetched: <code>{fetched_messages}</code>\nTotal messages saved: <code>{total_files}</code>\nDuplicate Files Skipped: <code>{duplicate}</code>\nDeleted Messages Skipped: <code>{deleted}</code>\nNon-Media messages skipped: <code>{no_media + unsupported}</code>(Unsupported Media - `{unsupported}` )\nErrors Occurred: <code>{errors}</code>",
+                                reply_markup=reply
+                            )
+                        except MessageNotModified:
+                            pass
+
+                    if message.empty:
+                        deleted += 1
+                        continue
+                    elif not message.media:
+                        no_media += 1
+                        continue
+                    elif message.media not in [enums.MessageMediaType.VIDEO, enums.MessageMediaType.AUDIO, enums.MessageMediaType.DOCUMENT]:
+                        unsupported += 1
+                        continue
+
+                    media = getattr(message, message.media.value, None)
+                    if not media:
+                        unsupported += 1
+                        continue
+
+                    file_id, file_ref = unpack_new_file_id(media.file_id)
+                    file_name = clean_file_name(media.file_name)
+
+                    files_batch.append({
+                        '_id': file_id,
+                        'file_ref': file_ref,
+                        'file_name': file_name,
+                        'file_size': media.file_size,
+                        'file_type': message.media.value,
+                        'mime_type': media.mime_type,
+                        'caption': message.caption.html if message.caption else None,
+                        'file_id': file_id
+                    })
+
+                    if len(files_batch) >= batch_size:
                         saved, dup = await save_files(files_batch)
                         total_files += saved
                         duplicate += dup
                         files_batch.clear()
-                    await msg.edit(f"Successfully Cancelled!!\n\nSaved <code>{total_files}</code> files to dataBase!\nDuplicate Files Skipped: <code>{duplicate}</code>\nDeleted Messages Skipped: <code>{deleted}</code>\nNon-Media messages skipped: <code>{no_media + unsupported}</code>(Unsupported Media - `{unsupported}` )\nErrors Occurred: <code>{errors}</code>")
-                    break
-                current += 1
-                if current % 30 == 0:
-                    can = [[InlineKeyboardButton('Cancel', callback_data='index_cancel')]]
-                    reply = InlineKeyboardMarkup(can)
-                    try:
-                        await msg.edit_text(
-                            text=f"Total messages fetched: <code>{current}</code>\nTotal messages saved: <code>{total_files}</code>\nDuplicate Files Skipped: <code>{duplicate}</code>\nDeleted Messages Skipped: <code>{deleted}</code>\nNon-Media messages skipped: <code>{no_media + unsupported}</code>(Unsupported Media - `{unsupported}` )\nErrors Occurred: <code>{errors}</code>",
-                            reply_markup=reply
-                        )
-                    except MessageNotModified:
-                        pass
 
-                if message.empty:
-                    deleted += 1
-                    continue
-                elif not message.media:
-                    no_media += 1
-                    continue
-                elif message.media not in [enums.MessageMediaType.VIDEO, enums.MessageMediaType.AUDIO, enums.MessageMediaType.DOCUMENT]:
-                    unsupported += 1
-                    continue
+                # If loop completes without error, break the while loop
+                break
 
-                media = getattr(message, message.media.value, None)
-                if not media:
-                    unsupported += 1
-                    continue
+            except ChannelPrivate:
+                retries += 1
+                logger.warning(f"ChannelPrivate error at message ID {current}. Retrying in 60 seconds... (Attempt {retries}/{max_retries})")
+                await msg.edit(f"Telegram is slowing me down. Waiting 60 seconds... (Attempt {retries}/{max_retries})")
+                await asyncio.sleep(60)
 
-                file_id, file_ref = unpack_new_file_id(media.file_id)
-                file_name = clean_file_name(media.file_name)
+            except Exception as e:
+                logger.exception(f"An error occurred at message ID {current}: {e}")
+                await msg.edit(f'Error: {e}')
+                error_occured = True
+                break
 
-                files_batch.append({
-                    '_id': file_id,
-                    'file_ref': file_ref,
-                    'file_name': file_name,
-                    'file_size': media.file_size,
-                    'file_type': message.media.value,
-                    'mime_type': media.mime_type,
-                    'caption': message.caption.html if message.caption else None,
-                    'file_id': file_id
-                })
+        if retries >= max_retries:
+            await msg.edit("Failed to index files after multiple retries due to repeated channel access errors. Please try again later.")
+            error_occured = True
 
-                if len(files_batch) >= batch_size:
-                    saved, dup = await save_files(files_batch)
-                    total_files += saved
-                    duplicate += dup
-                    files_batch.clear()
-
-        except Exception as e:
-            logger.exception(e)
-            await msg.edit(f'Error: {e}')
-        finally:
+        if not error_occured:
             if files_batch:
                 saved, dup = await save_files(files_batch)
                 total_files += saved
