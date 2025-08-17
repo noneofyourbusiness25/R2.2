@@ -10,6 +10,7 @@ from pyrogram.errors import FloodWait, MessageNotModified
 from pyrogram.errors.exceptions.bad_request_400 import ChannelInvalid, ChatAdminRequired, UsernameInvalid, UsernameNotModified, ChannelPrivate, MessageIdInvalid
 from info import INDEX_REQ_CHANNEL as LOG_CHANNEL
 from database.ia_filterdb import save_files, unpack_new_file_id, clean_file_name
+from database.users_chats_db import db
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 logger = logging.getLogger(__name__)
@@ -135,20 +136,6 @@ async def send_for_index(bot, message):
     await message.reply('ThankYou For the Contribution, Wait For My Moderators to verify the files.')
 
 
-@Client.on_message(filters.command('setskip') & filters.user(ADMINS))
-async def set_skip_number(bot, message):
-    if ' ' in message.text:
-        _, skip = message.text.split(" ")
-        try:
-            skip = int(skip)
-        except:
-            return await message.reply("Skip number should be an integer.")
-        await message.reply(f"Successfully set SKIP number as {skip}")
-        temp.CURRENT = int(skip)
-    else:
-        await message.reply("Give me a skip number")
-
-
 async def index_files_to_db(lst_msg_id, chat, msg, bot):
     total_files = 0
     duplicate = 0
@@ -162,7 +149,7 @@ async def index_files_to_db(lst_msg_id, chat, msg, bot):
     max_retries = 3
     retries = 0
     error_occured = False
-    current = temp.CURRENT
+    current = await db.get_last_indexed_id()
 
     async with lock:
         while retries < max_retries:
@@ -186,7 +173,7 @@ async def index_files_to_db(lst_msg_id, chat, msg, bot):
                     fetched_messages += 1
 
                     if fetched_messages % 30 == 0:
-                        temp.CURRENT = current
+                        await db.update_last_indexed_id(current)
                         can = [[InlineKeyboardButton('Cancel', callback_data='index_cancel')]]
                         reply = InlineKeyboardMarkup(can)
                         try:
@@ -265,6 +252,7 @@ async def index_files_to_db(lst_msg_id, chat, msg, bot):
                 saved, dup = await save_files(files_batch)
                 total_files += saved
                 duplicate += dup
+            await db.update_last_indexed_id(current)
             try:
                 await msg.edit(f'Succesfully saved <code>{total_files}</code> to dataBase!\nDuplicate Files Skipped: <code>{duplicate}</code>\nDeleted Messages Skipped: <code>{deleted}</code>\nNon-Media messages skipped: <code>{no_media + unsupported}</code>(Unsupported Media - `{unsupported}` )\nErrors Occurred: <code>{errors}</code>')
             except MessageIdInvalid:

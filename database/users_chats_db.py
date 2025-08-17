@@ -75,7 +75,21 @@ class Database:
         self.users = self.db.uersz
         self.bot = self.db.clone_bots
         self.bot_info = self.db.bot_info
+        self.state = self.db.state
 
+
+    async def update_last_indexed_id(self, new_id):
+        await self.state.update_one(
+            {'_id': 'main_indexer'},
+            {'$set': {'last_message_id': new_id}},
+            upsert=True
+        )
+
+    async def get_last_indexed_id(self):
+        state = await self.state.find_one({'_id': 'main_indexer'})
+        if state:
+            return state.get('last_message_id', 0)
+        return 0
 
     def new_user(self, id, name):
         return dict(
