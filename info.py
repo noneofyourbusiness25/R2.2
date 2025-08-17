@@ -5,7 +5,7 @@
 
 import re
 from os import environ
-from Script import script 
+from Script import script
 
 id_pattern = re.compile(r'^.\d+$')
 
@@ -18,6 +18,7 @@ BOT_TOKEN = environ.get('BOT_TOKEN', "")
 
 # This Pictures Is For Start Message Picture, You Can Add Multiple By Giving One Space Between Each.
 PICS = (environ.get('PICS', 'https://telegra.ph/file/166a5a50e52563960e937.jpg')).split()
+LOADING_GIF = environ.get('LOADING_GIF', "https://envs.sh/uiT.mp4")
 
 
 # Admins & Users
@@ -28,7 +29,7 @@ AUTH_USERS = (auth_users + ADMINS) if auth_users else []
 # This Channel Is For When User Start Your Bot Then Bot Send That User Name And Id In This Log Channel, Same For Group Also.
 LOG_CHANNEL = int(environ.get('LOG_CHANNEL', '-1001891893870'))
 
-# This Is File Channel Where You Upload Your File Then Bot Automatically Save It In Database 
+# This Is File Channel Where You Upload Your File Then Bot Automatically Save It In Database
 CHANNELS = [int(ch) if id_pattern.search(ch) else ch for ch in environ.get('CHANNELS', '-1002646022372 -1001546863630 -1001230197447 -1001582228236 -1001606601484 -1001409905076 -1001169954007 -1001749696923 -1001809652945 -1001877117508 -1001767342018').split()]  # For Multiple Id Use One Space Between Each.
 
 # auth_channel means force subscribe channel.
@@ -36,7 +37,7 @@ CHANNELS = [int(ch) if id_pattern.search(ch) else ch for ch in environ.get('CHAN
 REQUEST_TO_JOIN_MODE = bool(environ.get('REQUEST_TO_JOIN_MODE', False)) # Set True Or False
 TRY_AGAIN_BTN = bool(environ.get('TRY_AGAIN_BTN', False)) # Set True Or False (This try again button is only for request to join fsub not for normal fsub)
 
-# This Is Force Subscribe Channel, also known as Auth Channel 
+# This Is Force Subscribe Channel, also known as Auth Channel
 auth_channel = environ.get('AUTH_CHANNEL', '-1001531365423') # give your force subscribe channel id here else leave it blank
 AUTH_CHANNEL = int(auth_channel) if auth_channel and id_pattern.search(auth_channel) else None
 
@@ -44,7 +45,7 @@ AUTH_CHANNEL = int(auth_channel) if auth_channel and id_pattern.search(auth_chan
 reqst_channel = environ.get('REQST_CHANNEL', '-1002286061910')
 REQST_CHANNEL = int(reqst_channel) if reqst_channel and id_pattern.search(reqst_channel) else None
 
-# This Channel Is For Index Request 
+# This Channel Is For Index Request
 INDEX_REQ_CHANNEL = int(environ.get('INDEX_REQ_CHANNEL', LOG_CHANNEL))
 
 # This Is Your Bot Support Group Id , Here Bot Will Not Give File Because This Is Support Group.
@@ -144,7 +145,7 @@ IMDB_TEMPLATE = environ.get("IMDB_TEMPLATE", f"{script.IMDB_TEMPLATE_TXT}")
 MAX_LIST_ELM = environ.get("MAX_LIST_ELM", None)
 
 
-# Choose Option Settings 
+# Choose Option Settings
 LANGUAGES = ["malayalam", "mal", "tamil", "tam" ,"english", "eng", "hindi", "hin", "telugu", "tel", "kannada", "kan"]
 SEASONS = ["season 1", "season 2", "season 3", "season 4", "season 5", "season 6", "season 7", "season 8", "season 9", "season 10"]
 EPISODES = ["E01", "E02", "E03", "E04", "E05", "E06", "E07", "E08", "E09", "E10", "E11", "E12", "E13", "E14", "E15", "E16", "E17", "E18", "E19", "E20", "E21", "E22", "E23", "E24", "E25", "E26", "E27", "E28", "E29", "E30", "E31", "E32", "E33", "E34", "E35", "E36", "E37", "E38", "E39", "E40"]
@@ -198,6 +199,3 @@ else:
 # Don't Remove Credit @VJ_Botz
 # Subscribe YouTube Channel For Amazing Bot @Tech_VJ
 # Ask Doubt on telegram @KingVJ01
-
-
-

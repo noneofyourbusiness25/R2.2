@@ -107,7 +107,7 @@ async def give_filter(client, message):
             try:
                 if settings.get('auto_ffilter'):
                     ai_search = True
-                    reply_msg = await message.reply_text(f"<b><i>Searching For {message.text} 🔍</i></b>")
+                    reply_msg = await message.reply_photo(photo=LOADING_GIF, caption=f"<b><i>Searching For {message.text} 🔍</i></b>")
                     await auto_filter(client, message.text, message, reply_msg, ai_search)
             except Exception as e:
                 logger.exception(f"[GIVE_FILTER] An unexpected error occurred: {e}")
@@ -130,7 +130,7 @@ async def pm_text(bot, message):
     if content.startswith("/") or content.startswith("#"): return  # ignore commands and hashtags
     if PM_SEARCH == True:
         ai_search = True
-        reply_msg = await bot.send_message(message.from_user.id, f"<b><i>Searching For {content} 🔍</i></b>", reply_to_message_id=message.id)
+        reply_msg = await bot.send_photo(message.from_user.id, photo=LOADING_GIF, caption=f"<b><i>Searching For {content} 🔍</i></b>", reply_to_message_id=message.id)
         await auto_filter(bot, content, message, reply_msg, ai_search)
 
 @Client.on_callback_query(filters.regex(r"^next"))
@@ -198,8 +198,8 @@ async def next_page(bot, query):
     btn.append([InlineKeyboardButton("🔎 Filter Results", callback_data=f"filter_results#{key}")])
 
     try:
-        await query.message.edit_text(
-            text=f"<b>Here are the results for your query.\nThis message will self-destruct in 10 minutes for privacy.</b>",
+        await query.message.edit_caption(
+            caption=f"<b>Here are the results for your query.\nThis message will self-destruct in 10 minutes for privacy.</b>",
             reply_markup=InlineKeyboardMarkup(btn)
         )
         asyncio.create_task(schedule_message_deletion(query.message, 600))
@@ -261,7 +261,7 @@ async def movies_cb_handler(client: Client, query: CallbackQuery):
         btn.append(pagination_buttons)
 
     btn.append([InlineKeyboardButton("⬅️ Back", callback_data=f"filter_results#{key}")])
-    await query.edit_message_text("Select Year:", reply_markup=InlineKeyboardMarkup(btn))
+    await query.edit_message_caption("Select Year:", reply_markup=InlineKeyboardMarkup(btn))
 
 @Client.on_callback_query(filters.regex(r"^year#"))
 async def year_select_cb_handler(client: Client, query: CallbackQuery):
@@ -282,7 +282,7 @@ async def year_select_cb_handler(client: Client, query: CallbackQuery):
     ]
     btn = [buttons[i:i+2] for i in range(0, len(buttons), 2)]
     btn.append([InlineKeyboardButton("⬅️ Back", callback_data=f"movies#{key}")])
-    await query.edit_message_text("Select Language:", reply_markup=InlineKeyboardMarkup(btn))
+    await query.edit_message_caption("Select Language:", reply_markup=InlineKeyboardMarkup(btn))
 
 # Series Flow
 @Client.on_callback_query(filters.regex(r"^series#"))
@@ -301,7 +301,7 @@ async def series_cb_handler(client: Client, query: CallbackQuery):
     btn = [InlineKeyboardButton(f"📁 Season {s}", callback_data=f"season#{s}#{key}") for s in seasons]
     btn = [btn[i:i+2] for i in range(0, len(btn), 2)]
     btn.append([InlineKeyboardButton("⬅️ Back", callback_data=f"filter_results#{key}")])
-    await query.edit_message_text("Select Season:", reply_markup=InlineKeyboardMarkup(btn))
+    await query.edit_message_caption("Select Season:", reply_markup=InlineKeyboardMarkup(btn))
 
 @Client.on_callback_query(filters.regex(r"^season#"))
 async def season_select_cb_handler(client: Client, query: CallbackQuery):
@@ -319,7 +319,7 @@ async def season_select_cb_handler(client: Client, query: CallbackQuery):
     btn = [InlineKeyboardButton(f"Episode {e}", callback_data=f"episode#{season}#{e}#{key}") for e in episodes]
     btn = [btn[i:i+3] for i in range(0, len(btn), 3)]
     btn.append([InlineKeyboardButton("⬅️ Back", callback_data=f"series#{key}")])
-    await query.edit_message_text("Select Episode:", reply_markup=InlineKeyboardMarkup(btn))
+    await query.edit_message_caption("Select Episode:", reply_markup=InlineKeyboardMarkup(btn))
 
 @Client.on_callback_query(filters.regex(r"^episode#"))
 async def episode_select_cb_handler(client: Client, query: CallbackQuery):
@@ -340,7 +340,7 @@ async def episode_select_cb_handler(client: Client, query: CallbackQuery):
     ]
     btn = [buttons[i:i+2] for i in range(0, len(buttons), 2)]
     btn.append([InlineKeyboardButton("⬅️ Back", callback_data=f"season#{season}#{key}")])
-    await query.edit_message_text("Select Language:", reply_markup=InlineKeyboardMarkup(btn))
+    await query.edit_message_caption("Select Language:", reply_markup=InlineKeyboardMarkup(btn))
 
 # Final handler
 @Client.on_callback_query(filters.regex(r"^lang#"))
@@ -386,7 +386,7 @@ async def spell_check_helper(client, message, reply_msg):
         for s in suggestions[:5]
     ]
     btn.append([InlineKeyboardButton("Close", callback_data=f"spol#{message.from_user.id}#close_spellcheck")])
-    await reply_msg.edit("I couldn't find anything for that. Did you mean one of these?", reply_markup=InlineKeyboardMarkup(btn))
+    await reply_msg.edit_caption("I couldn't find anything for that. Did you mean one of these?", reply_markup=InlineKeyboardMarkup(btn))
 
 async def auto_filter(client, msg, message, reply_msg, ai_search, spoll=None):
     if spoll:
@@ -442,8 +442,8 @@ async def auto_filter(client, msg, message, reply_msg, ai_search, spoll=None):
     btn.append([InlineKeyboardButton("🔎 Filter Results", callback_data=f"filter_results#{key}")])
 
     try:
-        await reply_msg.edit_text(
-            text=f"<b>Here are the results for your query.\nThis message will self-destruct in 10 minutes for privacy.</b>",
+        await reply_msg.edit_caption(
+            caption=f"<b>Here are the results for your query.\nThis message will self-destruct in 10 minutes for privacy.</b>",
             reply_markup=InlineKeyboardMarkup(btn)
         )
         asyncio.create_task(schedule_message_deletion(reply_msg, 600))
@@ -521,7 +521,12 @@ async def advantage_spoll_choker(bot, query):
             if files:
                 k = (movie, files, offset, total_results, clean_query)
                 ai_search = True
-                reply_msg = await query.message.edit_text(f"<b><i>Searching For {movie} 🔍</i></b>")
+                await query.message.delete()
+                reply_msg = await bot.send_photo(
+                    chat_id=query.message.chat.id,
+                    photo=LOADING_GIF,
+                    caption=f"<b><i>Searching For {movie} 🔍</i></b>"
+                )
                 await auto_filter(bot, movie, query, reply_msg, ai_search, k)
             else:
                 reqstr1 = query.from_user.id if query.from_user else 0
