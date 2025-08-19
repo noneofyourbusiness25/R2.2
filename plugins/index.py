@@ -185,6 +185,9 @@ async def index_files_to_db(lst_msg_id, chat, msg, bot):
                     current = message.id
                     fetched_messages += 1
 
+                    # Sleep for a short time to avoid flooding the API
+                    await asyncio.sleep(1)
+
                     if fetched_messages % 30 == 0:
                         can = [[InlineKeyboardButton('Cancel', callback_data='index_cancel')]]
                         reply = InlineKeyboardMarkup(can)
@@ -233,6 +236,14 @@ async def index_files_to_db(lst_msg_id, chat, msg, bot):
 
                 # If loop completes without error, break the while loop
                 break
+
+            except FloodWait as e:
+                logger.warning(f"FloodWait error at message ID {current}. Waiting for {e.value} seconds.")
+                try:
+                    await msg.edit(f"Telegram is slowing me down. Waiting {e.value} seconds...")
+                except MessageIdInvalid:
+                    logger.warning("Message to edit was deleted.")
+                await asyncio.sleep(e.value)
 
             except ChannelPrivate:
                 retries += 1

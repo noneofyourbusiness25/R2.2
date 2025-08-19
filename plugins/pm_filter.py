@@ -441,14 +441,20 @@ async def auto_filter(client, msg, message, reply_msg, ai_search, spoll=None):
 
     btn.append([InlineKeyboardButton("🔎 Filter Results", callback_data=f"filter_results#{key}")])
 
-    try:
-        await reply_msg.edit_caption(
-            caption=f"<b>Here are the results for your query.\nThis message will self-destruct in 10 minutes for privacy.</b>",
-            reply_markup=InlineKeyboardMarkup(btn)
-        )
-        asyncio.create_task(schedule_message_deletion(reply_msg, 600))
-    except Exception as e:
-        logger.exception(f"Error editing message in auto_filter: {e}")
+    while True:
+        try:
+            await reply_msg.edit_caption(
+                caption=f"<b>Here are the results for your query.\nThis message will self-destruct in 10 minutes for privacy.</b>",
+                reply_markup=InlineKeyboardMarkup(btn)
+            )
+            asyncio.create_task(schedule_message_deletion(reply_msg, 600))
+            break
+        except FloodWait as e:
+            logger.warning(f"FloodWait error in auto_filter. Waiting for {e.value} seconds.")
+            await asyncio.sleep(e.value)
+        except Exception as e:
+            logger.exception(f"Error editing message in auto_filter: {e}")
+            break
 
 async def manual_filters(client, message, text=False):
     group_id = message.chat.id
