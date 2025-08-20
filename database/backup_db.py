@@ -41,3 +41,37 @@ def get_backup_status():
     if settings:
         return settings.get("enabled", False), settings.get("channel_id")
     return False, None
+
+def update_last_backed_up_file(file_id):
+    """Updates the last backed up file ID."""
+    collection.update_one(
+        {"_id": "backup_settings"},
+        {"$set": {"last_backed_up": file_id}},
+        upsert=True
+    )
+
+def get_last_backed_up_file():
+    """Gets the last backed up file ID."""
+    settings = collection.find_one({"_id": "backup_settings"})
+    return settings.get("last_backed_up") if settings else None
+
+def pause_backup():
+    """Pauses the backup process."""
+    collection.update_one(
+        {"_id": "backup_settings"},
+        {"$set": {"paused": True}},
+        upsert=True
+    )
+
+def resume_backup():
+    """Resumes the backup process."""
+    collection.update_one(
+        {"_id": "backup_settings"},
+        {"$set": {"paused": False}},
+        upsert=True
+    )
+
+def is_backup_paused():
+    """Checks if the backup process is paused."""
+    settings = collection.find_one({"_id": "backup_settings"})
+    return settings.get("paused", False) if settings else False
