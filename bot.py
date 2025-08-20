@@ -87,8 +87,8 @@ async def start():
         try:
             k = await TechVJBot.send_message(chat_id=ch, text="**Bot Restarted**")
             await k.delete()
-        except:
-            print("Make Your Bot Admin In File Channels With Full Rights")
+        except Exception as e:
+            print(f"Error sending message to channel {ch}: {e}\nMake sure your bot is an admin in this channel with full rights.")
     try:
         k = await TechVJBot.send_message(chat_id=AUTH_CHANNEL, text="**Bot Restarted**")
         await k.delete()
