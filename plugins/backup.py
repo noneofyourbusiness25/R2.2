@@ -4,7 +4,7 @@ from pyrogram.types import Message
 from pyrogram.errors import FloodWait
 from info import ADMINS
 from database.backup_db import set_backup_channel, get_backup_channel, backup_on, backup_off, get_backup_status
-from database.ia_filterdb import get_all_files
+from database.ia_filterdb import get_all_files, count_all_files
 
 @Client.on_message(filters.command("set_backup_channel") & filters.user(ADMINS))
 async def set_backup_channel_handler(bot: Client, message: Message):
@@ -42,23 +42,24 @@ async def backup_all_handler(bot: Client, message: Message):
         await message.reply_text("Please set a backup channel first using /set_backup_channel.")
         return
 
-    files = await get_all_files()
-    total_files = len(files)
+    total_files = await count_all_files()
     if total_files == 0:
         await message.reply_text("There are no files in the database to backup.")
         return
 
     await message.reply_text(f"Starting backup of {total_files} files. This may take a while...")
 
-    for i, file in enumerate(files):
+    backed_up_count = 0
+    async for file in get_all_files():
         try:
             await bot.send_document(
                 chat_id=backup_channel,
                 document=file["file_id"],
                 caption=file.get("caption", "")
             )
-            if (i + 1) % 100 == 0:
-                await message.reply_text(f"Backed up {i + 1} / {total_files} files.")
+            backed_up_count += 1
+            if backed_up_count % 100 == 0:
+                await message.reply_text(f"Backed up {backed_up_count} / {total_files} files.")
             await asyncio.sleep(1)
         except FloodWait as e:
             await asyncio.sleep(e.x)
@@ -70,4 +71,4 @@ async def backup_all_handler(bot: Client, message: Message):
         except Exception as e:
             await message.reply_text(f"An error occurred while backing up file with ID `{file['_id']}`: {e}")
 
-    await message.reply_text("Backup completed successfully!")
+    await message.reply_text(f"Backup completed successfully! Total files backed up: {backed_up_count}")

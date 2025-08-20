@@ -403,9 +403,18 @@ def unpack_new_file_id(new_file_id):
     return file_id, decoded.file_reference
 
 async def get_all_files():
-    """Get all files from the database."""
-    files = []
-    files.extend(list(col.find()))
+    """Get all files from the database as a generator."""
+    cursor = col.find()
+    for file in cursor:
+        yield file
     if MULTIPLE_DATABASE:
-        files.extend(list(sec_col.find()))
-    return files
+        cursor = sec_col.find()
+        for file in cursor:
+            yield file
+
+async def count_all_files():
+    """Count all files in the database."""
+    count = col.count_documents({})
+    if MULTIPLE_DATABASE:
+        count += sec_col.count_documents({})
+    return count
