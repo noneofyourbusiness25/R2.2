@@ -402,13 +402,18 @@ def unpack_new_file_id(new_file_id):
     )
     return file_id, decoded.file_reference
 
-async def get_all_files():
-    """Get all files from the database as a generator."""
-    cursor = col.find()
+async def get_all_files(last_id=None):
+    """Get all files from the database as a generator, starting after a specific ID."""
+    query = {}
+    if last_id:
+        query['_id'] = {'$gt': last_id}
+
+    cursor = col.find(query).sort('_id', 1)
     for file in cursor:
         yield file
+
     if MULTIPLE_DATABASE:
-        cursor = sec_col.find()
+        cursor = sec_col.find(query).sort('_id', 1)
         for file in cursor:
             yield file
 
