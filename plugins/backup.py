@@ -35,6 +35,25 @@ async def backup_status_handler(bot: Client, message: Message):
         f"Backup Channel: `{channel_id}`"
     )
 
+async def send_file_safely(bot, chat_id, file_id, caption, file_type):
+    """A helper function to send files and handle different media types."""
+    try:
+        if file_type == "video":
+            await bot.send_video(chat_id=chat_id, video=file_id, caption=caption)
+        elif file_type == "audio":
+            await bot.send_audio(chat_id=chat_id, audio=file_id, caption=caption)
+        else:
+            await bot.send_document(chat_id=chat_id, document=file_id, caption=caption)
+        return True
+    except FloodWait as e:
+        await asyncio.sleep(e.value)
+        return await send_file_safely(bot, chat_id, file_id, caption, file_type)  # Retry after waiting
+    except Exception as e:
+        # Log the error but don't stop the backup process
+        print(f"An error occurred while sending file {file_id}: {e}")
+        return False
+
+
 @Client.on_message(filters.command("backup_all") & filters.user(ADMINS))
 async def backup_all_handler(bot: Client, message: Message):
     backup_channel = get_backup_channel()
@@ -51,24 +70,16 @@ async def backup_all_handler(bot: Client, message: Message):
 
     backed_up_count = 0
     async for file in get_all_files():
-        try:
-            await bot.send_document(
-                chat_id=backup_channel,
-                document=file["file_id"],
-                caption=file.get("caption", "")
-            )
+        file_id = file["file_id"]
+        caption = file.get("caption", "")
+        file_type = file.get("file_type")
+
+        if await send_file_safely(bot, backup_channel, file_id, caption, file_type):
             backed_up_count += 1
-            if backed_up_count % 100 == 0:
-                await message.reply_text(f"Backed up {backed_up_count} / {total_files} files.")
-            await asyncio.sleep(1)
-        except FloodWait as e:
-            await asyncio.sleep(e.x)
-            await bot.send_document(
-                chat_id=backup_channel,
-                document=file["file_id"],
-                caption=file.get("caption", "")
-            )
-        except Exception as e:
-            await message.reply_text(f"An error occurred while backing up file with ID `{file['_id']}`: {e}")
+
+        if backed_up_count % 50 == 0:
+            await message.reply_text(f"Backed up {backed_up_count} / {total_files} files.")
+
+        await asyncio.sleep(1) # Add a delay to be respectful to Telegram API
 
     await message.reply_text(f"Backup completed successfully! Total files backed up: {backed_up_count}")
