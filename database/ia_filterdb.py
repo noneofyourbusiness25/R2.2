@@ -9,8 +9,6 @@ from pyrogram.file_id import FileId
 from pymongo import MongoClient
 from pymongo.errors import DuplicateKeyError, BulkWriteError
 from info import FILE_DB_URI, SEC_FILE_DB_URI, DATABASE_NAME, COLLECTION_NAME, MULTIPLE_DATABASE, USE_CAPTION_FILTER, MAX_B_TN
-from database.backup_db import get_backup_status
-import asyncio
 
 logger = logging.getLogger(__name__)
 
@@ -70,59 +68,29 @@ async def save_file(media):
             return False, 0
 
 async def save_files(files):
-    """Save multiple files in the database and backup if enabled."""
-    inserted_ids = []
+    """Save multiple files in the database."""
     try:
         result = col.insert_many(files, ordered=False)
-        inserted_count = len(result.inserted_ids)
-        inserted_ids = result.inserted_ids
-        duplicates = 0
+        return len(result.inserted_ids), 0
     except BulkWriteError as e:
+        # Count duplicates and other errors
         duplicates = sum(1 for error in e.details['writeErrors'] if error['code'] == 11000)
-        inserted_count = e.details['nInserted']
-        # Get the list of successfully inserted IDs, even with errors
-        inserted_ids = [item['_id'] for item in files if item['_id'] not in [err['op']['_id'] for err in e.details['writeErrors']]]
-    except Exception:
+        return e.details['nInserted'], duplicates
+    except Exception as e:
         logger.exception(f"Primary DB bulk insert failed. Trying secondary DB if enabled.")
         if MULTIPLE_DATABASE:
             try:
                 result = sec_col.insert_many(files, ordered=False)
-                inserted_count = len(result.inserted_ids)
-                inserted_ids = result.inserted_ids
-                duplicates = 0
+                return len(result.inserted_ids), 0
             except BulkWriteError as e:
                 duplicates = sum(1 for error in e.details['writeErrors'] if error['code'] == 11000)
-                inserted_count = e.details['nInserted']
-                inserted_ids = [item['_id'] for item in files if item['_id'] not in [err['op']['_id'] for err in e.details['writeErrors']]]
+                return e.details['nInserted'], duplicates
             except Exception:
                 logger.exception(f"Secondary DB bulk insert failed.")
                 return 0, len(files)
         else:
             print("Your Current File Database Is Full, Turn On Multiple Database Feature And Add Second File Mongodb To Save File.")
             return 0, len(files)
-
-    # Automatic backup
-    enabled, backup_channel = get_backup_status()
-    if enabled and backup_channel and inserted_ids:
-        from bot import Client
-        # Fetch the full documents for the inserted files
-        inserted_files = []
-        inserted_files.extend(list(col.find({'_id': {'$in': inserted_ids}})))
-        if MULTIPLE_DATABASE:
-            inserted_files.extend(list(sec_col.find({'_id': {'$in': inserted_ids}})))
-
-        for file in inserted_files:
-            try:
-                await Client.send_document(
-                    chat_id=backup_channel,
-                    document=file["file_id"],
-                    caption=file.get("caption", "")
-                )
-                await asyncio.sleep(1)
-            except Exception as e:
-                logger.error(f"Failed to backup file {file['_id']}: {e}")
-
-    return inserted_count, duplicates
 
 def clean_file_name(file_name):
     """Clean and format the file name."""
@@ -401,25 +369,3 @@ def unpack_new_file_id(new_file_id):
         )
     )
     return file_id, decoded.file_reference
-
-async def get_all_files(last_id=None):
-    """Get all files from the database as a generator, starting after a specific ID."""
-    query = {}
-    if last_id:
-        query['_id'] = {'$gt': last_id}
-
-    cursor = col.find(query).sort('_id', 1)
-    for file in cursor:
-        yield file
-
-    if MULTIPLE_DATABASE:
-        cursor = sec_col.find(query).sort('_id', 1)
-        for file in cursor:
-            yield file
-
-async def count_all_files():
-    """Count all files in the database."""
-    count = col.count_documents({})
-    if MULTIPLE_DATABASE:
-        count += sec_col.count_documents({})
-    return count
