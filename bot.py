@@ -48,7 +48,8 @@ async def monitor_channels():
         for channel in CHANNELS:
             last_message_id = await db.get_last_message_id(channel)
             try:
-                async for message in TechVJBot.iter_history(channel, offset_id=last_message_id, reverse=True):
+                messages = await TechVJBot.get_chat_history(channel, offset_id=last_message_id)
+                for message in reversed(messages):
                     if message.media:
                         media = getattr(message, message.media.value, None)
                         if media and hasattr(media, "file_name"):
