@@ -94,6 +94,11 @@ CHNL_LNK = environ.get('CHNL_LNK', 'https://t.me/R_Bots_Updates')
 SUPPORT_CHAT = environ.get('SUPPORT_CHAT', 'r_bot_support') # Support Chat Link Without https:// or @
 OWNER_LNK = environ.get('OWNER_LNK', 'https://t.me/GraveReaper')
 
+# File Update Announcements
+UPDATES_CHANNEL = int(environ.get('UPDATES_CHANNEL', '-1001320122046'))
+FILE_UPDATES_ON = bool(environ.get('FILE_UPDATES_ON', True))
+UPDATE_INTERVAL = int(environ.get('UPDATE_INTERVAL', 60))
+
 # True Or False
 AI_SPELL_CHECK = bool(environ.get('AI_SPELL_CHECK', True))
 PM_SEARCH = bool(environ.get('PM_SEARCH', True))

@@ -11,6 +11,7 @@ from pyrogram.errors.exceptions.bad_request_400 import ChannelInvalid, ChatAdmin
 from info import INDEX_REQ_CHANNEL as LOG_CHANNEL
 from database.ia_filterdb import save_files, unpack_new_file_id, clean_file_name
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from bot import announcement_manager
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -230,6 +231,9 @@ async def index_files_to_db(lst_msg_id, chat, msg, bot):
 
                     if len(files_batch) >= batch_size:
                         saved, dup = await save_files(files_batch)
+                        if saved > 0 and announcement_manager:
+                            for file_info in files_batch:
+                                await announcement_manager.add_file(file_info['file_name'])
                         total_files += saved
                         duplicate += dup
                         files_batch.clear()
@@ -273,8 +277,13 @@ async def index_files_to_db(lst_msg_id, chat, msg, bot):
         if not error_occured:
             if files_batch:
                 saved, dup = await save_files(files_batch)
+                if saved > 0 and announcement_manager:
+                    for file_info in files_batch:
+                        await announcement_manager.add_file(file_info['file_name'])
                 total_files += saved
                 duplicate += dup
+            if announcement_manager:
+                await announcement_manager.process_buffer(force=True)
             try:
                 await msg.edit(f'Succesfully saved <code>{total_files}</code> to dataBase!\nDuplicate Files Skipped: <code>{duplicate}</code>\nDeleted Messages Skipped: <code>{deleted}</code>\nNon-Media messages skipped: <code>{no_media + unsupported}</code>(Unsupported Media - `{unsupported}` )\nErrors Occurred: <code>{errors}</code>')
             except MessageIdInvalid:

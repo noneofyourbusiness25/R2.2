@@ -56,13 +56,19 @@ default_setgs = {
     'is_tutorial': IS_TUTORIAL
 }
 
-from info import VERIFY, VERIFY_SHORTLINK_URL, VERIFY_SHORTLINK_API
+from info import VERIFY, VERIFY_SHORTLINK_URL, VERIFY_SHORTLINK_API, FILE_UPDATES_ON, UPDATES_CHANNEL
 
 bot_info_setgs = {
     '_id': 'bot_settings',
     'verify': VERIFY,
     'verify_shortlink_url': VERIFY_SHORTLINK_URL,
     'verify_shortlink_api': VERIFY_SHORTLINK_API,
+}
+
+update_setgs = {
+    '_id': 'update_settings',
+    'file_updates_on': FILE_UPDATES_ON,
+    'channel_id': UPDATES_CHANNEL
 }
 
 class Database:
@@ -75,6 +81,7 @@ class Database:
         self.users = self.db.uersz
         self.bot = self.db.clone_bots
         self.bot_info = self.db.bot_info
+        self.update_settings = self.db.update_settings
 
 
     def new_user(self, id, name):
@@ -346,5 +353,18 @@ class Database:
 
     async def update_bot_settings(self, key, value):
         await self.bot_info.update_one({'_id': 'bot_settings'}, {'$set': {key: value}})
+
+    async def get_update_settings(self):
+        settings = await self.update_settings.find_one({'_id': 'update_settings'})
+        if not settings:
+            await self.update_settings.insert_one(update_setgs)
+            return update_setgs
+        return settings
+
+    async def update_channel_id(self, channel_id):
+        await self.update_settings.update_one({'_id': 'update_settings'}, {'$set': {'channel_id': channel_id}})
+
+    async def update_feature_status(self, status):
+        await self.update_settings.update_one({'_id': 'update_settings'}, {'$set': {'file_updates_on': status}})
 
 db = Database(USER_DB_URI, DATABASE_NAME)
