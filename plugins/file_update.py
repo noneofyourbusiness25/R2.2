@@ -55,33 +55,47 @@ class AnnouncementManager:
         self.buffer = []
         self.lock = asyncio.Lock()
         self.task = asyncio.create_task(self.periodic_check())
+        logger.info("AnnouncementManager initialized.")
 
     async def periodic_check(self):
         while True:
             await asyncio.sleep(UPDATE_INTERVAL)
+            logger.info("Periodic check running...")
             await self.process_buffer(force=True)
 
     async def add_file(self, filename):
         async with self.lock:
             if filename not in self.buffer:
                 self.buffer.append(filename)
+                logger.info(f"Added file to buffer: {filename}")
+                logger.info(f"Buffer size: {len(self.buffer)}")
         await self.process_buffer()
 
     async def process_buffer(self, force=False):
+        logger.info("Processing buffer...")
         async with self.lock:
             if len(self.buffer) >= 10 or (force and self.buffer):
+                if len(self.buffer) >= 10:
+                    logger.info("Buffer size >= 10, sending announcement.")
+                if force and self.buffer:
+                    logger.info("Forcing announcement.")
                 await self.send_announcement()
 
     async def send_announcement(self):
+        logger.info("Sending announcement...")
         if not self.buffer:
+            logger.info("Buffer is empty, not sending.")
             return
 
         settings = await db.get_update_settings()
+        logger.info(f"Update settings: {settings}")
         if not settings.get('file_updates_on'):
+            logger.info("File updates are off.")
             return
 
         channel_id = settings.get('channel_id')
         if not channel_id:
+            logger.info("Update channel not set.")
             return
 
         prettify_manager = PrettifyManager()
@@ -96,11 +110,11 @@ class AnnouncementManager:
         text += "\n\n🤔 How to get these files ❔\n✅ Copy the text by tapping on text\n✅ Use this Link\n✅ Select any group and paste it there\n🍿 Enjoy @R_Bots_Updates 🍿"
 
         try:
+            logger.info(f"Sending announcement to channel {channel_id}")
             await self.bot.send_message(chat_id=channel_id, text=text)
+            logger.info("Announcement sent successfully.")
         except Exception as e:
-            logger.error(f"Error sending announcement: {e}")
-
-        self.last_update_time = asyncio.get_event_loop().time()
+            logger.error(f"Error sending announcement: {e}", exc_info=True)
 
 @Client.on_message(filters.command('add_update_channel') & filters.user(ADMINS))
 async def add_update_channel(bot, message):

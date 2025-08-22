@@ -36,7 +36,6 @@ ppath = "plugins/*.py"
 files = glob.glob(ppath)
 # TechVJBot = TechVJBot()  <- This is the line that has been removed.
 loop = asyncio.get_event_loop()
-announcement_manager = None
 
 async def periodic_save():
     """Periodically save the file batch to the database every 60 seconds."""
@@ -68,8 +67,7 @@ async def start():
     # Start the periodic saving task for channel files
     asyncio.create_task(periodic_save())
 
-    global announcement_manager
-    announcement_manager = AnnouncementManager(TechVJBot)
+    TechVJBot.announcement_manager = AnnouncementManager(TechVJBot)
 
     b_users, b_chats = await db.get_banned()
     temp.BANNED_USERS = b_users

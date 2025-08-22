@@ -210,26 +210,28 @@ async def is_subscribed(bot, query):
             else:
                 try:
                     user_data = await bot.get_chat_member(AUTH_CHANNEL, query.from_user.id)
+                    if user_data.status != enums.ChatMemberStatus.BANNED:
+                        user_data2 = await bot.get_chat_member(UPDATES_CHANNEL, query.from_user.id)
+                        if user_data2.status != enums.ChatMemberStatus.BANNED:
+                            return True
                 except UserNotParticipant:
                     pass
                 except Exception as e:
                     logger.exception(e)
-                else:
-                    if user_data.status != enums.ChatMemberStatus.BANNED:
-                        return True
         except Exception as e:
             logger.exception(e)
             return False
     else:
         try:
             user = await bot.get_chat_member(AUTH_CHANNEL, query.from_user.id)
+            if user.status != enums.ChatMemberStatus.BANNED:
+                user2 = await bot.get_chat_member(UPDATES_CHANNEL, query.from_user.id)
+                if user2.status != enums.ChatMemberStatus.BANNED:
+                    return True
         except UserNotParticipant:
             pass
         except Exception as e:
             logger.exception(e)
-        else:
-            if user.status != enums.ChatMemberStatus.BANNED:
-                return True
         return False
 
 async def get_poster(query, bulk=False, id=False, file=None):
