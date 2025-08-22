@@ -108,7 +108,7 @@ async def give_filter(client, message):
                 if settings.get('auto_ffilter'):
                     ai_search = True
                     reply_msg = await message.reply_photo(photo=LOADING_GIF, caption=f"<b><i>Searching For {message.text} 🔍</i></b>")
-                    await auto_filter(client, message.text, message, reply_msg, ai_search)
+                    await auto_filter(client, message.text, message, reply_msg, ai_search, user_id)
             except Exception as e:
                 logger.exception(f"[GIVE_FILTER] An unexpected error occurred: {e}")
     else: #a better logic to avoid repeated lines of code in auto_filter function
@@ -131,7 +131,7 @@ async def pm_text(bot, message):
     if PM_SEARCH == True:
         ai_search = True
         reply_msg = await bot.send_photo(message.from_user.id, photo=LOADING_GIF, caption=f"<b><i>Searching For {content} 🔍</i></b>", reply_to_message_id=message.id)
-        await auto_filter(bot, content, message, reply_msg, ai_search)
+        await auto_filter(bot, content, message, reply_msg, ai_search, user_id)
 
 @Client.on_callback_query(filters.regex(r"^next"))
 async def next_page(bot, query):
@@ -374,7 +374,7 @@ async def lang_select_cb_handler(client: Client, query, lang=None, media_type=No
     if not files:
         return await query.answer("🚫 𝗡𝗼 𝗙𝗶𝗹𝗲 𝗪𝗲𝗿𝗲 𝗙𝗼𝘂𝗻𝗱 🚫", show_alert=1)
 
-    await auto_filter(client, search_query, query, query.message, True, spoll=(search_query, files, offset, total_results, clean_query))
+    await auto_filter(client, search_query, query, query.message, True, query.from_user.id, spoll=(search_query, files, offset, total_results, clean_query))
 
 async def spell_check_helper(client, message, reply_msg):
     query = message.text
@@ -388,7 +388,7 @@ async def spell_check_helper(client, message, reply_msg):
     btn.append([InlineKeyboardButton("Close", callback_data=f"spol#{message.from_user.id}#close_spellcheck")])
     await reply_msg.edit_caption("I couldn't find anything for that. Did you mean one of these?", reply_markup=InlineKeyboardMarkup(btn))
 
-async def auto_filter(client, msg, message, reply_msg, ai_search, spoll=None):
+async def auto_filter(client, msg, message, reply_msg, ai_search, user_id, spoll=None):
     if spoll:
         search, files, offset, total_results, clean_query = spoll
     else:
@@ -402,7 +402,7 @@ async def auto_filter(client, msg, message, reply_msg, ai_search, spoll=None):
             return await reply_msg.edit("🤷‍♂️ No results found 🤷‍♂️")
 
     key = os.urandom(6).hex()
-    temp.ACTIVE_SEARCHES[key] = {'query': clean_query, 'user_id': message.from_user.id}
+    temp.ACTIVE_SEARCHES[key] = {'query': clean_query, 'user_id': user_id}
 
     # Score and sort the files
     scored_files = []
@@ -533,7 +533,7 @@ async def advantage_spoll_choker(bot, query):
                     photo=LOADING_GIF,
                     caption=f"<b><i>Searching For {movie} 🔍</i></b>"
                 )
-                await auto_filter(bot, movie, query, reply_msg, ai_search, k)
+                await auto_filter(bot, movie, query, reply_msg, ai_search, query.from_user.id, k)
             else:
                 reqstr1 = query.from_user.id if query.from_user else 0
                 reqstr = await bot.get_users(reqstr1)
