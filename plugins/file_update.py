@@ -22,29 +22,27 @@ class PrettifyManager:
         # 1. Remove file extension
         filename, _ = os.path.splitext(filename)
 
-        # 2. Handle series content
-        series_match = self.series_pattern.search(filename)
+        # 2. Normalize dots and underscores to spaces for consistent parsing
+        cleaned_filename = re.sub(r'[._]', ' ', filename)
+
+        # 3. Cut at series or year
+        series_match = self.series_pattern.search(cleaned_filename)
         if series_match:
-            # Keep only the part of the filename before and including the series match
-            filename = filename[:series_match.end()]
+            # If it's a series, cut at the end of the SxxExx pattern
+            cleaned_filename = cleaned_filename[:series_match.end()]
+        else:
+            year_match = self.year_pattern.search(cleaned_filename)
+            if year_match:
+                # If it's a movie, cut at the end of the year
+                cleaned_filename = cleaned_filename[:year_match.end()]
 
-        # 3. Normalize separators
-        # Replace dots, underscores, hyphens, and brackets with spaces
-        filename = re.sub(r'[._\-[\]()]', ' ', filename)
+        # 4. Final cleanup
+        # Remove any lingering brackets or parentheses
+        cleaned_filename = re.sub(r'[\[\]()]', '', cleaned_filename)
+        # Collapse multiple spaces and strip
+        cleaned_filename = re.sub(r'\s+', ' ', cleaned_filename).strip()
 
-        # 4. Remove common noise/quality keywords
-        noise = ['1080p', '720p', '480p', '360p', 'bluray', 'web-dl', 'web', 'hdrip', 'dvdrip',
-                 'x264', 'x265', 'h264', 'h265', 'aac', 'dts', 'ac3', 'dd5 1',
-                 'proper', 'internal', 'repack', 'subs', 'dual audio']
-        # Build a regex to find whole words from the noise list
-        noise_pattern = r'\b(' + '|'.join(re.escape(n) for n in noise) + r')\b'
-        filename = re.sub(noise_pattern, '', filename, flags=re.IGNORECASE)
-
-        # 5. Final cleanup
-        # Collapse multiple spaces and strip leading/trailing space
-        filename = re.sub(r'\s+', ' ', filename).strip()
-
-        return filename
+        return cleaned_filename
 
 class AnnouncementManager:
     def __init__(self, bot):
