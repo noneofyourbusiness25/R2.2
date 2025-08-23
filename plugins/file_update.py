@@ -122,12 +122,11 @@ async def announcement_settings(bot, message):
     buttons = [
         [InlineKeyboardButton("Announcements: " + ("On" if settings.get('file_updates_on') else "Off"), callback_data="toggle_announcements")],
         [InlineKeyboardButton("Set Update Channel", callback_data="set_update_channel")],
-        [InlineKeyboardButton("Set Monitored Channels", callback_data="set_monitored_channels")],
-        [InlineKeyboardButton("Prime Announcements", callback_data="prime_announcements")]
+        [InlineKeyboardButton("Set Monitored Channels", callback_data="set_monitored_channels")]
     ]
     await message.reply_text("Announcement Settings", reply_markup=InlineKeyboardMarkup(buttons))
 
-@Client.on_callback_query(filters.regex(r"^(toggle_announcements|set_update_channel|set_monitored_channels|prime_announcements)$"))
+@Client.on_callback_query(filters.regex(r"^(toggle_announcements|set_update_channel|set_monitored_channels)$"))
 async def announcement_settings_cb(bot, query):
     data = query.data
     if data == "toggle_announcements":
@@ -138,8 +137,7 @@ async def announcement_settings_cb(bot, query):
             InlineKeyboardMarkup([
                 [InlineKeyboardButton("Announcements: " + ("On" if new_status else "Off"), callback_data="toggle_announcements")],
                 [InlineKeyboardButton("Set Update Channel", callback_data="set_update_channel")],
-                [InlineKeyboardButton("Set Monitored Channels", callback_data="set_monitored_channels")],
-                [InlineKeyboardButton("Prime Announcements", callback_data="prime_announcements")]
+                [InlineKeyboardButton("Set Monitored Channels", callback_data="set_monitored_channels")]
             ])
         )
     elif data == "set_update_channel":
@@ -155,18 +153,6 @@ async def announcement_settings_cb(bot, query):
             channels = [int(ch) for ch in ask.text.split()]
             await db.update_monitored_channels(channels)
             await ask.reply_text("Monitored channels have been set.")
-    elif data == "prime_announcements":
-        await query.message.edit_text("Priming announcements... This may take a while.")
-        settings = await db.get_update_settings()
-        monitored_channels = settings.get('monitored_channels', [])
-        for channel in monitored_channels:
-            try:
-                async for msg in bot.get_chat_history(channel, limit=1):
-                    if msg:
-                        await db.update_last_message_id(channel, msg.id)
-            except Exception as e:
-                logger.error(f"Error priming channel {channel}: {e}", exc_info=True)
-        await query.message.edit_text("Priming complete. The bot will now only announce new files.")
 
 @Client.on_message(filters.chat(CHANNELS) & filters.media)
 async def new_file_handler(bot, message):
