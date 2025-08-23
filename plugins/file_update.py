@@ -19,35 +19,31 @@ class PrettifyManager:
         self.delimiter_pattern = re.compile(r'[-._(\[]|1080p|720p')
 
     def prettify_filename(self, filename):
-        # Remove file extension
+        # 1. Remove file extension
         filename, _ = os.path.splitext(filename)
 
-        # Remove @ tags
-        filename = re.sub(r'^@\w+\s*', '', filename)
-
-        # Normalize: replace . and _ with space, collapse multiple spaces
-        filename = re.sub(r'[._]', ' ', filename)
-        filename = re.sub(r'\s+', ' ', filename).strip()
-
-        # Remove special characters
-        filename = re.sub(r'''[_"':+-/()]''', '', filename)
-
-        # Extraction based on series pattern
+        # 2. Handle series content
         series_match = self.series_pattern.search(filename)
         if series_match:
-            return filename[:series_match.end()].strip()
+            # Keep only the part of the filename before and including the series match
+            filename = filename[:series_match.end()]
 
-        # Extraction based on year pattern
-        year_match = self.year_pattern.search(filename)
-        if year_match:
-            return filename[:year_match.end()].strip()
+        # 3. Normalize separators
+        # Replace dots, underscores, hyphens, and brackets with spaces
+        filename = re.sub(r'[._\-[\]()]', ' ', filename)
 
-        # Fallback 1: cut at first delimiter
-        delimiter_match = self.delimiter_pattern.search(filename)
-        if delimiter_match:
-            return filename[:delimiter_match.start()].strip()
+        # 4. Remove common noise/quality keywords
+        noise = ['1080p', '720p', '480p', '360p', 'bluray', 'web-dl', 'web', 'hdrip', 'dvdrip',
+                 'x264', 'x265', 'h264', 'h265', 'aac', 'dts', 'ac3', 'dd5 1',
+                 'proper', 'internal', 'repack', 'subs', 'dual audio']
+        # Build a regex to find whole words from the noise list
+        noise_pattern = r'\b(' + '|'.join(re.escape(n) for n in noise) + r')\b'
+        filename = re.sub(noise_pattern, '', filename, flags=re.IGNORECASE)
 
-        # Fallback 2: use full normalized filename
+        # 5. Final cleanup
+        # Collapse multiple spaces and strip leading/trailing space
+        filename = re.sub(r'\s+', ' ', filename).strip()
+
         return filename
 
 class AnnouncementManager:
