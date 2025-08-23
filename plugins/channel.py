@@ -14,11 +14,16 @@ files_batch = []
 lock = asyncio.Lock()
 BATCH_SIZE = 50 
 
+from bot import TechVJBot
+
 async def save_batch():
     """Saves the collected files to the database and clears the batch."""
     async with lock:
         if files_batch:
-            await save_files(files_batch)
+            saved, _ = await save_files(files_batch)
+            if saved > 0 and hasattr(TechVJBot, 'announcement_manager'):
+                for file_info in files_batch:
+                    await TechVJBot.announcement_manager.add_file(file_info['file_name'])
             files_batch.clear()
 
 @Client.on_message(filters.chat(CHANNELS) & media_filter)
