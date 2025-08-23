@@ -166,3 +166,12 @@ async def monitored_channel_filter(_, __, message):
     return message.chat.id in monitored_channels
 
 monitored_channel = filters.create(monitored_channel_filter)
+
+@Client.on_message(monitored_channel & filters.media)
+async def new_file_handler(bot, message):
+    if hasattr(bot, 'announcement_manager'):
+        media = getattr(message, message.media.value, None)
+        if media and hasattr(media, "file_name"):
+            saved, _ = await save_file(media)
+            if saved:
+                await bot.announcement_manager.add_file(media.file_name)

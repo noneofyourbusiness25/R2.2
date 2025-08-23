@@ -71,47 +71,36 @@ async def save_file(media):
 
 async def save_files(files):
     """Save multiple files in the database and backup if enabled."""
-    inserted_ids = []
+    saved_files = []
     try:
         result = col.insert_many(files, ordered=False)
-        inserted_count = len(result.inserted_ids)
         inserted_ids = result.inserted_ids
-        duplicates = 0
+        saved_files = [f for f in files if f['_id'] in inserted_ids]
     except BulkWriteError as e:
-        duplicates = sum(1 for error in e.details['writeErrors'] if error['code'] == 11000)
-        inserted_count = e.details['nInserted']
-        # Get the list of successfully inserted IDs, even with errors
         inserted_ids = [item['_id'] for item in files if item['_id'] not in [err['op']['_id'] for err in e.details['writeErrors']]]
+        saved_files = [f for f in files if f['_id'] in inserted_ids]
     except Exception:
         logger.exception(f"Primary DB bulk insert failed. Trying secondary DB if enabled.")
         if MULTIPLE_DATABASE:
             try:
                 result = sec_col.insert_many(files, ordered=False)
-                inserted_count = len(result.inserted_ids)
                 inserted_ids = result.inserted_ids
-                duplicates = 0
+                saved_files = [f for f in files if f['_id'] in inserted_ids]
             except BulkWriteError as e:
-                duplicates = sum(1 for error in e.details['writeErrors'] if error['code'] == 11000)
-                inserted_count = e.details['nInserted']
                 inserted_ids = [item['_id'] for item in files if item['_id'] not in [err['op']['_id'] for err in e.details['writeErrors']]]
+                saved_files = [f for f in files if f['_id'] in inserted_ids]
             except Exception:
                 logger.exception(f"Secondary DB bulk insert failed.")
-                return 0, len(files)
+                return [], len(files)
         else:
             print("Your Current File Database Is Full, Turn On Multiple Database Feature And Add Second File Mongodb To Save File.")
-            return 0, len(files)
+            return [], len(files)
 
     # Automatic backup
     enabled, backup_channel = get_backup_status()
-    if enabled and backup_channel and inserted_ids:
+    if enabled and backup_channel and saved_files:
         from bot import Client
-        # Fetch the full documents for the inserted files
-        inserted_files = []
-        inserted_files.extend(list(col.find({'_id': {'$in': inserted_ids}})))
-        if MULTIPLE_DATABASE:
-            inserted_files.extend(list(sec_col.find({'_id': {'$in': inserted_ids}})))
-
-        for file in inserted_files:
+        for file in saved_files:
             try:
                 await Client.send_document(
                     chat_id=backup_channel,
@@ -122,7 +111,7 @@ async def save_files(files):
             except Exception as e:
                 logger.error(f"Failed to backup file {file['_id']}: {e}")
 
-    return inserted_count, duplicates
+    return saved_files, len(files) - len(saved_files)
 
 def clean_file_name(file_name):
     """Clean and format the file name."""
