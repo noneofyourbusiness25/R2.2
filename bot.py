@@ -43,27 +43,6 @@ async def periodic_save():
         await asyncio.sleep(60)
         await save_batch()
 
-async def monitor_channels():
-    while True:
-        for channel in CHANNELS:
-            last_message_id = await db.get_last_message_id(channel)
-            try:
-                messages = []
-                async for message in TechVJBot.get_chat_history(channel, offset_id=last_message_id):
-                    messages.append(message)
-
-                for message in reversed(messages):
-                    if message.media:
-                        media = getattr(message, message.media.value, None)
-                        if media and hasattr(media, "file_name"):
-                            await TechVJBot.announcement_manager.add_file(media.file_name)
-                    last_message_id = message.id
-            except Exception as e:
-                logging.error(f"Error monitoring channel {channel}: {e}", exc_info=True)
-            if last_message_id != 0:
-                await db.update_last_message_id(channel, last_message_id)
-        await asyncio.sleep(300) # Check every 5 minutes
-
 async def start():
     print('\n')
     print('Initalizing Your Bot')
@@ -87,9 +66,6 @@ async def start():
 
     # Start the periodic saving task for channel files
     asyncio.create_task(periodic_save())
-
-    # Start the channel monitoring task
-    asyncio.create_task(monitor_channels())
 
     TechVJBot.announcement_manager = AnnouncementManager(TechVJBot)
 

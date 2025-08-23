@@ -140,14 +140,9 @@ async def update_off(bot, message):
     await db.update_feature_status(False)
     await message.reply_text("File update announcements are now OFF.")
 
-@Client.on_message(filters.command('prime_announcements') & filters.user(ADMINS))
-async def prime_announcements(bot, message):
-    await message.reply_text("Priming announcements... This may take a while.")
-    for channel in CHANNELS:
-        try:
-            async for msg in bot.get_chat_history(channel, limit=1):
-                if msg:
-                    await db.update_last_message_id(channel, msg.id)
-        except Exception as e:
-            logger.error(f"Error priming channel {channel}: {e}", exc_info=True)
-    await message.reply_text("Priming complete. The bot will now only announce new files.")
+@Client.on_message(filters.chat(CHANNELS) & filters.media)
+async def new_file_handler(bot, message):
+    if hasattr(bot, 'announcement_manager'):
+        media = getattr(message, message.media.value, None)
+        if media and hasattr(media, "file_name"):
+            await bot.announcement_manager.add_file(media.file_name)

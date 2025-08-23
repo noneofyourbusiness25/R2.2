@@ -82,7 +82,6 @@ class Database:
         self.bot = self.db.clone_bots
         self.bot_info = self.db.bot_info
         self.update_settings = self.db.update_settings
-        self.channel_state = self.db.channel_state
 
 
     def new_user(self, id, name):
@@ -367,12 +366,5 @@ class Database:
 
     async def update_feature_status(self, status):
         await self.update_settings.update_one({'_id': 'update_settings'}, {'$set': {'file_updates_on': status}})
-
-    async def get_last_message_id(self, channel_id):
-        state = await self.channel_state.find_one({'_id': channel_id})
-        return state['last_message_id'] if state else 0
-
-    async def update_last_message_id(self, channel_id, message_id):
-        await self.channel_state.update_one({'_id': channel_id}, {'$set': {'last_message_id': message_id}}, upsert=True)
 
 db = Database(USER_DB_URI, DATABASE_NAME)
