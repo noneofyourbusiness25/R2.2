@@ -56,7 +56,7 @@ default_setgs = {
     'is_tutorial': IS_TUTORIAL
 }
 
-from info import VERIFY, VERIFY_SHORTLINK_URL, VERIFY_SHORTLINK_API, FILE_UPDATES_ON, UPDATES_CHANNEL
+from info import VERIFY, VERIFY_SHORTLINK_URL, VERIFY_SHORTLINK_API, FILE_UPDATES_ON, UPDATES_CHANNEL, MONITORED_CHANNELS
 
 bot_info_setgs = {
     '_id': 'bot_settings',
@@ -68,7 +68,8 @@ bot_info_setgs = {
 update_setgs = {
     '_id': 'update_settings',
     'file_updates_on': FILE_UPDATES_ON,
-    'channel_id': UPDATES_CHANNEL
+    'channel_id': UPDATES_CHANNEL,
+    'monitored_channels': MONITORED_CHANNELS
 }
 
 class Database:
@@ -366,5 +367,8 @@ class Database:
 
     async def update_feature_status(self, status):
         await self.update_settings.update_one({'_id': 'update_settings'}, {'$set': {'file_updates_on': status}}, upsert=True)
+
+    async def update_monitored_channels(self, channels):
+        await self.update_settings.update_one({'_id': 'update_settings'}, {'$set': {'monitored_channels': channels}}, upsert=True)
 
 db = Database(USER_DB_URI, DATABASE_NAME)

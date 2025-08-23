@@ -98,6 +98,7 @@ OWNER_LNK = environ.get('OWNER_LNK', 'https://t.me/GraveReaper')
 UPDATES_CHANNEL = int(environ.get('UPDATES_CHANNEL', '-1001320122046'))
 FILE_UPDATES_ON = bool(environ.get('FILE_UPDATES_ON', True))
 UPDATE_INTERVAL = int(environ.get('UPDATE_INTERVAL', 60))
+MONITORED_CHANNELS = [int(ch) for ch in environ.get('MONITORED_CHANNELS', '-1001606601484').split()]
 
 # True Or False
 AI_SPELL_CHECK = bool(environ.get('AI_SPELL_CHECK', True))

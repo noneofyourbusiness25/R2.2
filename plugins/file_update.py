@@ -116,32 +116,64 @@ class AnnouncementManager:
         except Exception as e:
             logger.error(f"Error sending announcement: {e}", exc_info=True)
 
-@Client.on_message(filters.command('add_update_channel') & filters.user(ADMINS))
-async def add_update_channel(bot, message):
-    if len(message.command) != 2:
-        return await message.reply_text("Usage: /add_update_channel <channel_id>")
+@Client.on_message(filters.command('announcement_settings') & filters.user(ADMINS))
+async def announcement_settings(bot, message):
+    settings = await db.get_update_settings()
+    buttons = [
+        [InlineKeyboardButton("Announcements: " + ("On" if settings.get('file_updates_on') else "Off"), callback_data="toggle_announcements")],
+        [InlineKeyboardButton("Set Update Channel", callback_data="set_update_channel")],
+        [InlineKeyboardButton("Set Monitored Channels", callback_data="set_monitored_channels")],
+        [InlineKeyboardButton("Prime Announcements", callback_data="prime_announcements")]
+    ]
+    await message.reply_text("Announcement Settings", reply_markup=InlineKeyboardMarkup(buttons))
 
-    channel_id = int(message.command[1])
-    await db.update_channel_id(channel_id)
-    await message.reply_text(f"Update channel set to {channel_id}")
-
-@Client.on_message(filters.command('rm_update_channel') & filters.user(ADMINS))
-async def rm_update_channel(bot, message):
-    await db.update_channel_id(None)
-    await message.reply_text("Update channel removed.")
-
-@Client.on_message(filters.command('update_on') & filters.user(ADMINS))
-async def update_on(bot, message):
-    await db.update_feature_status(True)
-    await message.reply_text("File update announcements are now ON.")
-
-@Client.on_message(filters.command('update_off') & filters.user(ADMINS))
-async def update_off(bot, message):
-    await db.update_feature_status(False)
-    await message.reply_text("File update announcements are now OFF.")
+@Client.on_callback_query(filters.regex(r"^(toggle_announcements|set_update_channel|set_monitored_channels|prime_announcements)$"))
+async def announcement_settings_cb(bot, query):
+    data = query.data
+    if data == "toggle_announcements":
+        settings = await db.get_update_settings()
+        new_status = not settings.get('file_updates_on')
+        await db.update_feature_status(new_status)
+        await query.message.edit_reply_markup(
+            InlineKeyboardMarkup([
+                [InlineKeyboardButton("Announcements: " + ("On" if new_status else "Off"), callback_data="toggle_announcements")],
+                [InlineKeyboardButton("Set Update Channel", callback_data="set_update_channel")],
+                [InlineKeyboardButton("Set Monitored Channels", callback_data="set_monitored_channels")],
+                [InlineKeyboardButton("Prime Announcements", callback_data="prime_announcements")]
+            ])
+        )
+    elif data == "set_update_channel":
+        ask = await query.message.chat.ask("Send me the ID of the new update channel.")
+        if ask.text and ask.text.lstrip('-').isdigit():
+            await db.update_channel_id(int(ask.text))
+            await ask.reply_text("Update channel has been set.")
+        else:
+            await ask.reply_text("Invalid channel ID.")
+    elif data == "set_monitored_channels":
+        ask = await query.message.chat.ask("Send me the IDs of the channels to monitor, separated by spaces.")
+        if ask.text:
+            channels = [int(ch) for ch in ask.text.split()]
+            await db.update_monitored_channels(channels)
+            await ask.reply_text("Monitored channels have been set.")
+    elif data == "prime_announcements":
+        await query.message.edit_text("Priming announcements... This may take a while.")
+        settings = await db.get_update_settings()
+        monitored_channels = settings.get('monitored_channels', [])
+        for channel in monitored_channels:
+            try:
+                async for msg in bot.get_chat_history(channel, limit=1):
+                    if msg:
+                        await db.update_last_message_id(channel, msg.id)
+            except Exception as e:
+                logger.error(f"Error priming channel {channel}: {e}", exc_info=True)
+        await query.message.edit_text("Priming complete. The bot will now only announce new files.")
 
 @Client.on_message(filters.chat(CHANNELS) & filters.media)
 async def new_file_handler(bot, message):
+    settings = await db.get_update_settings()
+    monitored_channels = settings.get('monitored_channels', [])
+    if message.chat.id not in monitored_channels:
+        return
     if hasattr(bot, 'announcement_manager'):
         media = getattr(message, message.media.value, None)
         if media and hasattr(media, "file_name"):
