@@ -41,7 +41,7 @@ async def periodic_save():
     """Periodically save the file batch to the database every 60 seconds."""
     while True:
         await asyncio.sleep(60)
-        await save_batch()
+        await save_batch(TechVJBot)
 
 async def start():
     print('\n')
