@@ -1,7 +1,7 @@
 import asyncio
 import re
 import os
-from pyrogram import Client, filters
+from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from info import ADMINS, UPDATE_INTERVAL, CHANNELS
 from database.users_chats_db import db
@@ -108,11 +108,11 @@ class AnnouncementManager:
 
         text = "📂 New files indexed:\n\n"
         text += "\n".join([f"`{name}` - ✅" for name in filenames])
-        text += "\n\n🤔 How to get these files ❔\n✅ Copy the text by tapping on text\n✅ Use this Link\n✅ Select any group and paste it there\n🍿 Enjoy @R_Bots_Updates 🍿"
+        text += "\n\n🤔 How to get these files ❔\n✅ Copy the text by tapping on text\n✅ [Use this Link](https://t.me/R_Bots_Updates/18)\n✅ Select any group and paste it there\n🍿 Enjoy @R_Bots_Updates 🍿"
 
         try:
             logger.info(f"Sending announcement to channel {channel_id}")
-            await self.bot.send_message(chat_id=channel_id, text=text)
+            await self.bot.send_message(chat_id=channel_id, text=text, parse_mode=enums.ParseMode.MARKDOWN)
             logger.info("Announcement sent successfully.")
         except Exception as e:
             logger.error(f"Error sending announcement: {e}", exc_info=True)
