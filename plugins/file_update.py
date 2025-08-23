@@ -3,7 +3,7 @@ import re
 import os
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
-from info import ADMINS, UPDATE_INTERVAL
+from info import ADMINS, UPDATE_INTERVAL, CHANNELS
 from database.users_chats_db import db
 from utils import get_size, is_subscribed
 import logging
@@ -139,3 +139,15 @@ async def update_on(bot, message):
 async def update_off(bot, message):
     await db.update_feature_status(False)
     await message.reply_text("File update announcements are now OFF.")
+
+@Client.on_message(filters.command('prime_announcements') & filters.user(ADMINS))
+async def prime_announcements(bot, message):
+    await message.reply_text("Priming announcements... This may take a while.")
+    for channel in CHANNELS:
+        try:
+            async for msg in bot.get_chat_history(channel, limit=1):
+                if msg:
+                    await db.update_last_message_id(channel, msg.id)
+        except Exception as e:
+            logger.error(f"Error priming channel {channel}: {e}", exc_info=True)
+    await message.reply_text("Priming complete. The bot will now only announce new files.")

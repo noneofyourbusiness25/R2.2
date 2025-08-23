@@ -48,7 +48,10 @@ async def monitor_channels():
         for channel in CHANNELS:
             last_message_id = await db.get_last_message_id(channel)
             try:
-                messages = await TechVJBot.get_chat_history(channel, offset_id=last_message_id)
+                messages = []
+                async for message in TechVJBot.get_chat_history(channel, offset_id=last_message_id):
+                    messages.append(message)
+
                 for message in reversed(messages):
                     if message.media:
                         media = getattr(message, message.media.value, None)
@@ -57,7 +60,8 @@ async def monitor_channels():
                     last_message_id = message.id
             except Exception as e:
                 logging.error(f"Error monitoring channel {channel}: {e}", exc_info=True)
-            await db.update_last_message_id(channel, last_message_id)
+            if last_message_id != 0:
+                await db.update_last_message_id(channel, last_message_id)
         await asyncio.sleep(300) # Check every 5 minutes
 
 async def start():
