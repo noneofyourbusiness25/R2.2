@@ -362,9 +362,9 @@ class Database:
         return settings
 
     async def update_channel_id(self, channel_id):
-        await self.update_settings.update_one({'_id': 'update_settings'}, {'$set': {'channel_id': channel_id}})
+        await self.update_settings.update_one({'_id': 'update_settings'}, {'$set': {'channel_id': channel_id}}, upsert=True)
 
     async def update_feature_status(self, status):
-        await self.update_settings.update_one({'_id': 'update_settings'}, {'$set': {'file_updates_on': status}})
+        await self.update_settings.update_one({'_id': 'update_settings'}, {'$set': {'file_updates_on': status}}, upsert=True)
 
 db = Database(USER_DB_URI, DATABASE_NAME)
