@@ -112,7 +112,12 @@ class AnnouncementManager:
 
         try:
             logger.info(f"Sending announcement to channel {channel_id}")
-            await self.bot.send_message(chat_id=channel_id, text=text, parse_mode=enums.ParseMode.MARKDOWN)
+            await self.bot.send_message(
+                chat_id=channel_id,
+                text=text,
+                parse_mode=enums.ParseMode.MARKDOWN,
+                disable_web_page_preview=True
+            )
             logger.info("Announcement sent successfully.")
         except Exception as e:
             logger.error(f"Error sending announcement: {e}", exc_info=True)
