@@ -154,12 +154,15 @@ async def announcement_settings_cb(bot, query):
             await db.update_monitored_channels(channels)
             await ask.reply_text("Monitored channels have been set.")
 
-@Client.on_message(filters.chat(CHANNELS) & filters.media)
-async def new_file_handler(bot, message):
+async def monitored_channel_filter(_, __, message):
     settings = await db.get_update_settings()
     monitored_channels = settings.get('monitored_channels', [])
-    if message.chat.id not in monitored_channels:
-        return
+    return message.chat.id in monitored_channels
+
+monitored_channel = filters.create(monitored_channel_filter)
+
+@Client.on_message(monitored_channel & filters.media)
+async def new_file_handler(bot, message):
     if hasattr(bot, 'announcement_manager'):
         media = getattr(message, message.media.value, None)
         if media and hasattr(media, "file_name"):
