@@ -51,7 +51,7 @@ def create_text_index():
                 collection.create_index(
                     [('file_name', 'text'), ('caption', 'text')],
                     name='file_name_text_caption_text',
-                    default_language='none'
+                    default_language='english'
                 )
                 logger.info(f"Text index created successfully for collection '{collection.name}'.")
             else:
