@@ -195,7 +195,11 @@ async def get_search_results(chat_id, query, file_type=None, max_results=10, off
     start_time = time.monotonic()
 
     # --- Language Processing ---
-    language, clean_query = process_language_from_query(query)
+    language, query = process_language_from_query(query)
+
+    # --- Custom Stop Word Removal and Query Sanitization ---
+    STOP_WORDS = ["movie", "send", "full", "hd"]
+    clean_query = ' '.join([word for word in query.strip().lower().split() if word not in STOP_WORDS])
 
     # --- Pattern Detection ---
     pattern_regex = detect_and_build_pattern_regex(clean_query)
@@ -217,9 +221,6 @@ async def get_search_results(chat_id, query, file_type=None, max_results=10, off
             all_files = []
             for collection in [col, sec_col] if MULTIPLE_DATABASE else [col]:
                 all_files.extend(list(collection.find(filter_criteria)))
-
-            # Sort by word count (fewer words is better)
-            all_files.sort(key=lambda x: len(x.get('file_name', '').split()))
 
             files = all_files[offset : offset + max_results]
             next_offset = offset + len(files) if total_results > offset + len(files) else ""
@@ -335,9 +336,9 @@ def detect_and_build_pattern_regex(query_text):
     if s_match:
         season = int(s_match.group(2))
         s_str, s0_str = f"{season:01d}", f"{season:02d}"
-        # This regex finds the season but ensures it's not immediately followed by an episode number
-        # to avoid conflict with the more specific S/E pattern.
-        pattern = f"S(0?{s_str}|{s0_str})(?![\s\._-]*?(E|EP|Episode))"
+        # This regex finds the season. It's less specific than the S/E pattern,
+        # so the S/E pattern must be checked first.
+        pattern = f"S(0?{s_str}|{s0_str})"
         return re.compile(pattern, re.IGNORECASE)
 
     return None
