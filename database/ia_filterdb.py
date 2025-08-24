@@ -231,6 +231,10 @@ async def get_search_results(chat_id, query, file_type=None, max_results=10, off
             for collection in [col, sec_col] if MULTIPLE_DATABASE else [col]:
                 all_files.extend(list(collection.find(filter_criteria)))
 
+            # Sort by newness (primary tie-breaker) then by word count (primary sort key)
+            all_files.sort(key=lambda doc: doc.get('_id'), reverse=True)
+            all_files.sort(key=lambda doc: len(doc.get('file_name', '').split()) if doc.get('file_name', '').strip() else float('inf'))
+
             files = all_files[offset : offset + max_results]
             next_offset = offset + len(files) if total_results > offset + len(files) else ""
         except Exception as e:
@@ -255,7 +259,7 @@ async def get_search_results(chat_id, query, file_type=None, max_results=10, off
                 'text_score': {'$meta': 'textScore'},
                 'word_count': {'$size': {'$split': ["$file_name", " "]}}
             }},
-            {'$sort': {'text_score': -1, 'word_count': 1}}
+            {'$sort': {'text_score': -1, 'word_count': 1, '_id': -1}}
         ])
 
         try:
