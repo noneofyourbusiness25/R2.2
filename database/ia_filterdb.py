@@ -240,11 +240,10 @@ async def get_search_results(chat_id, query, file_type=None, max_results=10, off
     else:
         # --- Execute Text-Based Search (Aggregation) ---
         search_type = "TEXT"
-        # If the query contains spaces, wrap it in quotes for phrase search
-        search_query = f'"{text_part}"' if ' ' in text_part else text_part
-
+        # The text_part is used directly. The $text operator will find documents
+        # containing all the words in text_part, which is a good default.
         pipeline = []
-        match_criteria = {'$text': {'$search': search_query}}
+        match_criteria = {'$text': {'$search': text_part}}
         if language:
             lang_filter = build_language_filter(language)
             match_criteria = {'$and': [match_criteria, lang_filter]}
@@ -281,6 +280,32 @@ async def get_search_results(chat_id, query, file_type=None, max_results=10, off
                 files = list(col.aggregate(paginated_pipeline))
 
             next_offset = offset + len(files) if total_results > offset + len(files) else ""
+
+            # If text search yields no results, try a literal regex search as a fallback
+            if total_results == 0:
+                logger.info(f"Text search failed for '{text_part}'. Trying regex fallback.")
+                search_type = "REGEX_FALLBACK"
+                # Build a regex that looks for all words in the query
+                words = re.escape(text_part).split()
+                regex_str = '.*'.join(words)
+                fallback_regex = re.compile(regex_str, re.IGNORECASE)
+
+                filter_criteria = {'$or': [{'file_name': fallback_regex}, {'caption': fallback_regex}]}
+                if language:
+                    lang_filter = build_language_filter(language)
+                    filter_criteria = {'$and': [filter_criteria, lang_filter]}
+
+                total_results = col.count_documents(filter_criteria)
+                if MULTIPLE_DATABASE:
+                    total_results += sec_col.count_documents(filter_criteria)
+
+                all_files = []
+                for collection in [col, sec_col] if MULTIPLE_DATABASE else [col]:
+                    all_files.extend(list(collection.find(filter_criteria)))
+
+                files = all_files[offset : offset + max_results]
+                next_offset = offset + len(files) if total_results > offset + len(files) else ""
+
         except Exception as e:
             logger.exception(f"Aggregation pipeline failed for query='{query}': {e}")
             files, next_offset, total_results = [], "", 0
@@ -335,7 +360,7 @@ def extract_pattern_and_text(query_text):
         episode = int(se_match.group(4))
         s_str, s0_str = f"{season:01d}", f"{season:02d}"
         e_str, e0_str = f"{episode:01d}", f"{episode:02d}"
-        pattern_str = f"S(0?{s_str}|{s0_str})[\\s\\._-]*?(E|EP)?[\\s\\._-]*?(0?{e_str}|{e0_str})"
+        pattern_str = f"S(0?{s_str}|{s0_str})[\\s\\._-]*?(E|EP)?[\\s\\._-]*?(0?{e_str}|{e0_str})\\b"
         pattern_regex = re.compile(pattern_str, re.IGNORECASE)
 
         # Extract the remaining text
