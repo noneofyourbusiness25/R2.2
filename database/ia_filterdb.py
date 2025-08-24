@@ -205,7 +205,7 @@ async def get_search_results(chat_id, query, file_type=None, max_results=10, off
     pattern_regex, text_part = extract_pattern_and_text(clean_query)
 
     if pattern_regex:
-        # --- Execute Pattern-Based Search (Regex) ---
+        # --- Execute Pattern-Based Search (Aggregation) ---
         search_type = "PATTERN"
 
         # Build a compound query to match both text and pattern
@@ -215,30 +215,46 @@ async def get_search_results(chat_id, query, file_type=None, max_results=10, off
         if text_regex:
             filter_conditions.append({'$or': [{'file_name': text_regex}, {'caption': text_regex}]})
 
-        filter_criteria = {'$and': filter_conditions} if len(filter_conditions) > 1 else filter_conditions[0]
+        match_criteria = {'$and': filter_conditions} if len(filter_conditions) > 1 else filter_conditions[0]
 
         if language:
             lang_filter = build_language_filter(language)
-            filter_criteria = {'$and': [filter_criteria, lang_filter]}
+            match_criteria = {'$and': [match_criteria, lang_filter]}
+
+        pipeline = [
+            {'$match': match_criteria},
+            {'$addFields': {
+                'word_count': {'$size': {'$ifNull': [{'$split': ["$file_name", " "]}, []]}}
+            }},
+            {'$sort': {'word_count': 1, '_id': -1}}
+        ]
 
         try:
-            total_results = col.count_documents(filter_criteria)
+            # Since we can't easily combine paginated aggregations, we'll handle it based on DB config
             if MULTIPLE_DATABASE:
-                total_results += sec_col.count_documents(filter_criteria)
+                # Fetch all, then sort and paginate in Python (less efficient but necessary)
+                all_files = []
+                for collection in [col, sec_col]:
+                    all_files.extend(list(collection.aggregate(pipeline)))
 
-            # Fetch and paginate
-            all_files = []
-            for collection in [col, sec_col] if MULTIPLE_DATABASE else [col]:
-                all_files.extend(list(collection.find(filter_criteria)))
+                # Sort by word_count then by _id
+                all_files.sort(key=lambda doc: doc.get('_id'), reverse=True)
+                all_files.sort(key=lambda doc: doc.get('word_count', float('inf')))
 
-            # Sort by newness (primary tie-breaker) then by word count (primary sort key)
-            all_files.sort(key=lambda doc: doc.get('_id'), reverse=True)
-            all_files.sort(key=lambda doc: len(doc.get('file_name', '').split()) if doc.get('file_name', '').strip() else float('inf'))
+                total_results = len(all_files)
+                files = all_files[offset : offset + max_results]
+            else:
+                # Efficiently paginate in the database for a single collection
+                count_pipeline = pipeline + [{'$count': 'total'}]
+                total_results_cursor = col.aggregate(count_pipeline)
+                total_results = next(total_results_cursor, {'total': 0})['total']
 
-            files = all_files[offset : offset + max_results]
+                paginated_pipeline = pipeline + [{'$skip': offset}, {'$limit': max_results}]
+                files = list(col.aggregate(paginated_pipeline))
+
             next_offset = offset + len(files) if total_results > offset + len(files) else ""
         except Exception as e:
-            logger.exception(f"Pattern search failed for query='{query}': {e}")
+            logger.exception(f"Pattern search pipeline failed for query='{query}': {e}")
             files, next_offset, total_results = [], "", 0
 
     else:
