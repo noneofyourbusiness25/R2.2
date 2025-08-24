@@ -30,6 +30,7 @@ from plugins.channel import save_batch
 from TechVJ.bot import TechVJBot
 from TechVJ.util.keepalive import ping_server
 from TechVJ.bot.clients import initialize_clients
+from database.ia_filterdb import create_text_index
 from plugins.file_update import AnnouncementManager
 
 ppath = "plugins/*.py"
@@ -48,6 +49,8 @@ async def start():
     print('Initalizing Your Bot')
     await TechVJBot.start()
     bot_info = await TechVJBot.get_me()
+    # Create text index for file search
+    create_text_index()
     await initialize_clients()
     for name in files:
         with open(name) as a:

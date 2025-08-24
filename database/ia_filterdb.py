@@ -25,6 +25,33 @@ sec_db = sec_client[DATABASE_NAME]
 sec_col = sec_db[COLLECTION_NAME]
 
 
+def create_text_index():
+    """Create a text index on file_name and caption fields for faster searches."""
+    # Check if the index already exists for the primary collection
+    existing_indexes = col.index_information()
+    if 'file_name_text_caption_text' not in existing_indexes:
+        try:
+            # Create a text index on both 'file_name' and 'caption'
+            col.create_index([('file_name', 'text'), ('caption', 'text')], name='file_name_text_caption_text')
+            logger.info("Text index created successfully for the primary collection.")
+        except Exception as e:
+            logger.error(f"Failed to create text index for primary collection: {e}")
+    else:
+        logger.info("Text index already exists for the primary collection.")
+
+    # Do the same for the secondary collection if it's enabled
+    if MULTIPLE_DATABASE:
+        existing_indexes_sec = sec_col.index_information()
+        if 'file_name_text_caption_text' not in existing_indexes_sec:
+            try:
+                sec_col.create_index([('file_name', 'text'), ('caption', 'text')], name='file_name_text_caption_text')
+                logger.info("Text index created successfully for the secondary collection.")
+            except Exception as e:
+                logger.error(f"Failed to create text index for secondary collection: {e}")
+        else:
+            logger.info("Text index already exists for the secondary collection.")
+
+
 async def save_file(media):
     """Save file in the database."""
 
@@ -152,67 +179,11 @@ def get_language_regex(language):
     # or surrounded by non-alphanumeric characters. This is more flexible than \b.
     return r'(?:^|[^a-zA-Z0-9])(' + '|'.join(map(re.escape, tokens)) + r')(?:$|[^a-zA-Z0-9])'
 
-STOP_WORDS = ["download", "full", "hd", "send", "movie", "series"]
-
-def normalize_and_generate_regex(query_text):
-    # Clean the query by removing stop words
-    query_text = ' '.join([word for word in query_text.split() if word.lower() not in STOP_WORDS])
-
-    # --- Parse Season/Episode ---
-    se_pattern = None
-    # Try to match SXXEXX format first, as it's more specific
-    se_match = re.search(r'\b(s|season)\s?(\d{1,2})[\s\._-]*(e|ep|episode)\s?(\d{1,3})\b', query_text, re.IGNORECASE)
-    if se_match:
-        season = int(se_match.group(2))
-        episode = int(se_match.group(4))
-        s_str, s0_str = f"{season:01d}", f"{season:02d}"
-        e_str, e0_str = f"{episode:01d}", f"{episode:02d}"
-        se_pattern = f"S(0?{s_str}|{s0_str})[\\s\\._-]*?(E|EP)?[\\s\\._-]*?(0?{e_str}|{e0_str})"
-        query_text = query_text.replace(se_match.group(0), '', 1)
-    else:
-        # If not found, try to match season-only format (e.g., S01)
-        s_match = re.search(r'\b(s|season)\s?(\d{1,2})\b', query_text, re.IGNORECASE)
-        if s_match:
-            season = int(s_match.group(2))
-            s_str, s0_str = f"{season:01d}", f"{season:02d}"
-            se_pattern = f"S(0?{s_str}|{s0_str})"
-            query_text = query_text.replace(s_match.group(0), '', 1)
-
-    # --- Parse Year ---
-    year_pattern = None
-    year_match = re.search(r'\b(19|20)\d{2}\b', query_text)
-    if year_match:
-        year_pattern = year_match.group(0)
-        query_text = query_text.replace(year_match.group(0), '', 1)
-
-    # --- The rest is the title ---
-    # The remaining parts of the query are treated as title keywords
-    title_parts = query_text.strip().split()
-
-    # --- Build a simple, ordered regex with word boundaries for the title ---
-    # This is much faster than lookaheads and more precise.
-    title_regex_parts = [r'\b' + re.escape(part) + r'\b' for part in title_parts if part]
-    all_parts = title_regex_parts
-
-    if year_pattern:
-        all_parts.append(year_pattern)
-    if se_pattern:
-        all_parts.append(se_pattern)
-
-    # Join all parts with '.*' to find them in order, separated by anything.
-    final_regex = '.*'.join(all_parts)
-
-    # The cleaned query is the title parts joined by a space
-    cleaned_query = ' '.join(title_parts)
-
-    return (final_regex, cleaned_query) if final_regex else (".*", cleaned_query)
-
 async def get_search_results(chat_id, query, file_type=None, max_results=10, offset=0, filter=False):
     """For given query return (results, next_offset, total_results)"""
     start_time = time.monotonic()
 
     # --- Language Processing ---
-    # This needs to be done once, before the main query is built.
     language = None
     language_token = None
     query_parts = query.lower().split()
@@ -225,47 +196,25 @@ async def get_search_results(chat_id, query, file_type=None, max_results=10, off
         if language:
             break
 
-    # If a language is found, remove it from the query to get a clean title query
     if language_token:
         query_parts.remove(language_token)
         query = " ".join(query_parts)
 
+    # Clean query for search
+    clean_query = query.strip()
+
     # --- Main Query Processing ---
-    raw_pattern, clean_query = normalize_and_generate_regex(query)
-
-    try:
-        regex = re.compile(raw_pattern, flags=re.IGNORECASE)
-    except re.error:
-        regex = re.escape(query)
-
-    filter_criteria = {'$or': [{'file_name': regex}, {'caption': regex}]}
+    filter_criteria = {'$text': {'$search': clean_query}}
 
     # --- Language Filtering ---
-    # Apply the language filter on top of the main filter criteria
     if language and language != "english":
         lang_regex = re.compile(get_language_regex(language), re.IGNORECASE)
-        filter_criteria = {
-            '$and': [
-                filter_criteria,
-                {'$or': [{'file_name': lang_regex}, {'caption': lang_regex}]}
-            ]
-        }
+        filter_criteria = {'$and': [filter_criteria, {'$or': [{'file_name': lang_regex}, {'caption': lang_regex}]}]}
     elif language == "english":
         all_other_lang_tokens = [token for lang, tokens in LANGUAGES.items() if lang != 'english' for token in tokens]
         other_langs_regex_pattern = r'(?:^|[^a-zA-Z0-9])(' + '|'.join(map(re.escape, all_other_lang_tokens)) + r')(?:$|[^a-zA-Z0-9])'
         other_langs_regex = re.compile(other_langs_regex_pattern, re.IGNORECASE)
-
-        filter_criteria = {
-            '$and': [
-                filter_criteria,
-                {
-                    '$nor': [
-                        {'file_name': other_langs_regex},
-                        {'caption': other_langs_regex}
-                    ]
-                }
-            ]
-        }
+        filter_criteria = {'$and': [filter_criteria, {'$nor': [{'file_name': other_langs_regex}, {'caption': other_langs_regex}]}]}
 
     # Get total count for pagination
     total_results = 0
@@ -274,54 +223,41 @@ async def get_search_results(chat_id, query, file_type=None, max_results=10, off
         if MULTIPLE_DATABASE:
             total_results += sec_col.count_documents(filter_criteria)
     except Exception as e:
-        logger.exception(f"Count documents failed | query='{query}' | pattern='{raw_pattern}'")
+        logger.exception(f"Count documents failed | query='{query}'")
 
     # Fetch paginated results
     files = []
-    fetched_primary = 0
-    fetched_secondary = 0
 
-    if MULTIPLE_DATABASE:
+    # Define the projection to include the text score for sorting
+    projection = {'score': {'$meta': 'textScore'}}
+    sort_order = [('score', {'$meta': 'textScore'})]
+
+    # Function to fetch from a single collection
+    def fetch_from_collection(collection):
         try:
-            cursor1 = col.find(filter_criteria).sort('$natural', -1).skip(offset).limit(max_results)
-            for file in cursor1:
-                files.append(file)
-                fetched_primary += 1
+            return list(collection.find(filter_criteria, projection).sort(sort_order))
         except Exception as e:
-            logger.exception(f"Primary DB find failed | query='{query}' | pattern='{raw_pattern}'")
+            logger.exception(f"DB find failed | query='{query}' | collection='{collection.name}'")
+            return []
 
-        # Adjust offset and limit for the second database if needed
-        remaining_limit = max_results - fetched_primary
-        if remaining_limit > 0:
-            secondary_offset = max(0, offset - total_results) # A simple way to handle offset across DBs
-            try:
-                cursor2 = sec_col.find(filter_criteria).sort('$natural', -1).skip(secondary_offset).limit(remaining_limit)
-                for file in cursor2:
-                    files.append(file)
-                    fetched_secondary += 1
-            except Exception as e:
-                logger.exception(f"Secondary DB find failed | query='{query}' | pattern='{raw_pattern}'")
-    else:
-        try:
-            cursor = col.find(filter_criteria).sort('$natural', -1).skip(offset).limit(max_results)
-            for file in cursor:
-                files.append(file)
-                fetched_primary += 1
-        except Exception:
-            logger.exception(f"Primary DB find failed (single DB mode) | query='{query}' | pattern='{raw_pattern}'")
+    all_files = fetch_from_collection(col)
+    if MULTIPLE_DATABASE:
+        all_files.extend(fetch_from_collection(sec_col))
+        # Sort combined results by score
+        all_files.sort(key=lambda x: x.get('score', 0), reverse=True)
+
+    # Apply pagination to the combined and sorted list
+    files = all_files[offset : offset + max_results]
 
     current_fetched = len(files)
     next_offset = offset + current_fetched if total_results > offset + current_fetched else ""
 
     duration_ms = int((time.monotonic() - start_time) * 1000)
     logger.info(
-        "get_search_results stats | query='%s' | pattern='%s' | total=%s | next_offset=%s | fetched_primary=%s | fetched_secondary=%s | duration_ms=%s",
+        "get_search_results stats | query='%s' | total=%s | next_offset=%s | duration_ms=%s",
         query,
-        raw_pattern,
         total_results,
         next_offset,
-        fetched_primary,
-        fetched_secondary,
         duration_ms,
     )
 
