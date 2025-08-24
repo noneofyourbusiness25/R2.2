@@ -190,93 +190,98 @@ def get_language_regex(language):
 
 async def get_search_results(chat_id, query, file_type=None, max_results=10, offset=0, filter=False):
     """
-    For a given query, return (results, next_offset, total_results)
-    using a powerful aggregation pipeline for smart sorting.
+    Conditionally executes a search based on the query type (pattern or text).
     """
     start_time = time.monotonic()
 
     # --- Language Processing ---
-    language, query = process_language_from_query(query)
+    language, clean_query = process_language_from_query(query)
 
-    # --- Query Sanitization and Phrase Search ---
-    clean_query = query.strip()
-    # If the query contains spaces, wrap it in quotes for phrase search
-    if ' ' in clean_query:
-        search_query = f'"{clean_query}"'
-    else:
-        search_query = clean_query
+    # --- Pattern Detection ---
+    pattern_regex = detect_and_build_pattern_regex(clean_query)
 
-    # --- Aggregation Pipeline Construction ---
-    pipeline = []
+    if pattern_regex:
+        # --- Execute Pattern-Based Search (Regex) ---
+        search_type = "PATTERN"
+        filter_criteria = {'$or': [{'file_name': pattern_regex}, {'caption': pattern_regex}]}
+        if language:
+            lang_filter = build_language_filter(language)
+            filter_criteria = {'$and': [filter_criteria, lang_filter]}
 
-    # Match stage: Use text search
-    match_criteria = {'$text': {'$search': search_query}}
+        try:
+            total_results = col.count_documents(filter_criteria)
+            if MULTIPLE_DATABASE:
+                total_results += sec_col.count_documents(filter_criteria)
 
-    # Language filtering
-    if language:
-        lang_filter = build_language_filter(language)
-        match_criteria = {'$and': [match_criteria, lang_filter]}
+            # Fetch, sort by word count, then paginate
+            all_files = []
+            for collection in [col, sec_col] if MULTIPLE_DATABASE else [col]:
+                all_files.extend(list(collection.find(filter_criteria)))
 
-    pipeline.append({'$match': match_criteria})
+            # Sort by word count (fewer words is better)
+            all_files.sort(key=lambda x: len(x.get('file_name', '').split()))
 
-    # Add fields for scoring and sorting
-    pipeline.append({
-        '$addFields': {
-            'text_score': {'$meta': 'textScore'},
-            'word_count': {'$size': {'$split': ["$file_name", " "]}}
-        }
-    })
-
-    # Sort stage: Two-level sorting
-    pipeline.append({
-        '$sort': {
-            'text_score': -1,  # Primary sort: by relevance
-            'word_count': 1    # Secondary sort: by title length (fewer words is better)
-        }
-    })
-
-    # --- Execute Pipeline and Paginate ---
-    try:
-        # To get the total count, we run a separate count pipeline
-        count_pipeline = pipeline + [{'$count': 'total'}]
-
-        # Execute for each collection and combine
-        total_results = 0
-        all_files = []
-
-        for collection in [col, sec_col] if MULTIPLE_DATABASE else [col]:
-            # Get total count from this collection
-            count_cursor = collection.aggregate(count_pipeline)
-            try:
-                total_results += next(count_cursor)['total']
-            except StopIteration:
-                pass # No results in this collection
-
-            # Get paginated results from this collection
-            paginated_pipeline = pipeline + [{'$skip': offset}, {'$limit': max_results}]
-            all_files.extend(list(collection.aggregate(paginated_pipeline)))
-
-        # If using multiple databases, we need to re-sort and paginate the combined results
-        if MULTIPLE_DATABASE and len(all_files) > 0:
-            all_files.sort(key=lambda x: (x.get('text_score', 0), -x.get('word_count', float('inf'))), reverse=True)
             files = all_files[offset : offset + max_results]
-        else:
-            files = all_files
+            next_offset = offset + len(files) if total_results > offset + len(files) else ""
+        except Exception as e:
+            logger.exception(f"Pattern search failed for query='{query}': {e}")
+            files, next_offset, total_results = [], "", 0
 
-        current_fetched = len(files)
-        next_offset = offset + current_fetched if total_results > offset + current_fetched else ""
+    else:
+        # --- Execute Text-Based Search (Aggregation) ---
+        search_type = "TEXT"
+        # If the query contains spaces, wrap it in quotes for phrase search
+        search_query = f'"{clean_query}"' if ' ' in clean_query else clean_query
 
-        duration_ms = int((time.monotonic() - start_time) * 1000)
-        logger.info(
-            "get_search_results stats | query='%s' | total=%s | next_offset=%s | duration_ms=%s",
-            clean_query, total_results, next_offset, duration_ms
-        )
+        pipeline = []
+        match_criteria = {'$text': {'$search': search_query}}
+        if language:
+            lang_filter = build_language_filter(language)
+            match_criteria = {'$and': [match_criteria, lang_filter]}
+        pipeline.append({'$match': match_criteria})
 
-        return files, next_offset, total_results, clean_query
+        # Add fields and sort
+        pipeline.extend([
+            {'$addFields': {
+                'text_score': {'$meta': 'textScore'},
+                'word_count': {'$size': {'$split': ["$file_name", " "]}}
+            }},
+            {'$sort': {'text_score': -1, 'word_count': 1}}
+        ])
 
-    except Exception as e:
-        logger.exception(f"Aggregation pipeline failed for query='{query}': {e}")
-        return [], 0, 0, query
+        try:
+            count_pipeline = pipeline + [{'$count': 'total'}]
+            total_results = 0
+            all_files = []
+
+            # Since pagination on aggregated results from multiple DBs is tricky,
+            # we fetch a bit more and sort/paginate in Python for the multi-db case.
+            # For a single DB, we can do it all in the pipeline.
+            if MULTIPLE_DATABASE:
+                 for collection in [col, sec_col]:
+                    all_files.extend(list(collection.aggregate(pipeline)))
+                 all_files.sort(key=lambda x: (x.get('text_score', 0), x.get('word_count', float('inf'))), reverse=False) # Note: this sort is tricky
+                 total_results = len(all_files)
+                 files = all_files[offset : offset + max_results]
+            else:
+                total_results_cursor = col.aggregate(count_pipeline)
+                total_results = next(total_results_cursor, {'total': 0})['total']
+
+                paginated_pipeline = pipeline + [{'$skip': offset}, {'$limit': max_results}]
+                files = list(col.aggregate(paginated_pipeline))
+
+            next_offset = offset + len(files) if total_results > offset + len(files) else ""
+        except Exception as e:
+            logger.exception(f"Aggregation pipeline failed for query='{query}': {e}")
+            files, next_offset, total_results = [], "", 0
+
+    duration_ms = int((time.monotonic() - start_time) * 1000)
+    logger.info(
+        "get_search_results stats | type=%s | query='%s' | total=%s | next_offset=%s | duration_ms=%s",
+        search_type, clean_query, total_results, next_offset, duration_ms
+    )
+
+    return files, next_offset, total_results, clean_query
 
 def process_language_from_query(query):
     """Extracts language from query and returns the language and cleaned query."""
@@ -307,6 +312,35 @@ def build_language_filter(language):
         other_langs_regex = re.compile(other_langs_regex_pattern, re.IGNORECASE)
         return {'$nor': [{'file_name': other_langs_regex}, {'caption': other_langs_regex}]}
     return {}
+
+def detect_and_build_pattern_regex(query_text):
+    """
+    Detects if a query is for a season/episode pattern and builds a regex for it.
+    Returns a regex object if a pattern is found, otherwise None.
+    """
+    # More comprehensive pattern for SXXEXX, SXX EXX, Season X Episode X, etc.
+    se_match = re.search(r'\b(s|season)\s?(\d{1,2})[\s\._-]*(e|ep|episode)\s?(\d{1,3})\b', query_text, re.IGNORECASE)
+    if se_match:
+        season = int(se_match.group(2))
+        episode = int(se_match.group(4))
+        # Build a flexible regex for this specific S/E combination
+        s_str, s0_str = f"{season:01d}", f"{season:02d}"
+        e_str, e0_str = f"{episode:01d}", f"{episode:02d}"
+        # This regex is very flexible: allows for "S01E01", "S01 E01", "S01EP01", "S01 EP 01", etc.
+        pattern = f"S(0?{s_str}|{s0_str})[\\s\\._-]*?(E|EP)?[\\s\\._-]*?(0?{e_str}|{e0_str})"
+        return re.compile(pattern, re.IGNORECASE)
+
+    # Pattern for just a season, like "S01" or "Season 1"
+    s_match = re.search(r'\b(s|season)\s?(\d{1,2})\b', query_text, re.IGNORECASE)
+    if s_match:
+        season = int(s_match.group(2))
+        s_str, s0_str = f"{season:01d}", f"{season:02d}"
+        # This regex finds the season but ensures it's not immediately followed by an episode number
+        # to avoid conflict with the more specific S/E pattern.
+        pattern = f"S(0?{s_str}|{s0_str})(?![\s\._-]*?(E|EP|Episode))"
+        return re.compile(pattern, re.IGNORECASE)
+
+    return None
 
 
 async def get_bad_files(query, file_type=None, use_filter=False):
