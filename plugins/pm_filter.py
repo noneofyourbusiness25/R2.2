@@ -131,6 +131,7 @@ async def next_page(bot, query):
     for file in files:
         file_id = file.get("file_id")
         title = file.get("file_name", "Unknown Title")
+        title = re.sub(r'@\S+', '', title).strip()
         size = get_size(file.get("file_size", 0))
 
         season, episode = parse_s_e_from_name(title)
@@ -368,6 +369,7 @@ async def auto_filter(client, msg, message, reply_msg, ai_search, user_id, spoll
     for file in files:
         file_id = file.get("file_id")
         title = file.get("file_name", "Unknown Title")
+        title = re.sub(r'@\S+', '', title).strip()
         size = get_size(file.get("file_size", 0))
 
         season, episode = parse_s_e_from_name(title)

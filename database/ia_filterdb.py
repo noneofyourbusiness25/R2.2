@@ -26,30 +26,39 @@ sec_col = sec_db[COLLECTION_NAME]
 
 
 def create_text_index():
-    """Create a text index on file_name and caption fields for faster searches."""
-    # Check if the index already exists for the primary collection
-    existing_indexes = col.index_information()
-    if 'file_name_text_caption_text' not in existing_indexes:
+    """
+    Create a robust text index on file_name and caption fields.
+    This function will drop any conflicting text indexes and create the desired one.
+    """
+    for collection in [col, sec_col] if MULTIPLE_DATABASE else [col]:
         try:
-            # Create a text index on both 'file_name' and 'caption'
-            col.create_index([('file_name', 'text'), ('caption', 'text')], name='file_name_text_caption_text')
-            logger.info("Text index created successfully for the primary collection.")
-        except Exception as e:
-            logger.error(f"Failed to create text index for primary collection: {e}")
-    else:
-        logger.info("Text index already exists for the primary collection.")
+            # Check for any existing text indexes
+            existing_indexes = collection.index_information()
+            text_index_name = None
+            for index_name, index_info in existing_indexes.items():
+                if 'text' in [key[0] for key in index_info['key']]:
+                    text_index_name = index_name
+                    break
 
-    # Do the same for the secondary collection if it's enabled
-    if MULTIPLE_DATABASE:
-        existing_indexes_sec = sec_col.index_information()
-        if 'file_name_text_caption_text' not in existing_indexes_sec:
-            try:
-                sec_col.create_index([('file_name', 'text'), ('caption', 'text')], name='file_name_text_caption_text')
-                logger.info("Text index created successfully for the secondary collection.")
-            except Exception as e:
-                logger.error(f"Failed to create text index for secondary collection: {e}")
-        else:
-            logger.info("Text index already exists for the secondary collection.")
+            # If a text index exists and it's not the one we want, drop it
+            if text_index_name and text_index_name != 'file_name_text_caption_text':
+                collection.drop_index(text_index_name)
+                logger.info(f"Dropped conflicting text index '{text_index_name}' from collection '{collection.name}'.")
+                existing_indexes = collection.index_information() # Refresh index info
+
+            # Now, create the desired text index if it doesn't exist
+            if 'file_name_text_caption_text' not in existing_indexes:
+                collection.create_index(
+                    [('file_name', 'text'), ('caption', 'text')],
+                    name='file_name_text_caption_text',
+                    default_language='none'
+                )
+                logger.info(f"Text index created successfully for collection '{collection.name}'.")
+            else:
+                logger.info(f"Text index already exists for collection '{collection.name}'.")
+
+        except Exception as e:
+            logger.error(f"Failed to create text index for collection '{collection.name}': {e}")
 
 
 async def save_file(media):
@@ -180,10 +189,97 @@ def get_language_regex(language):
     return r'(?:^|[^a-zA-Z0-9])(' + '|'.join(map(re.escape, tokens)) + r')(?:$|[^a-zA-Z0-9])'
 
 async def get_search_results(chat_id, query, file_type=None, max_results=10, offset=0, filter=False):
-    """For given query return (results, next_offset, total_results)"""
+    """
+    For a given query, return (results, next_offset, total_results)
+    using a powerful aggregation pipeline for smart sorting.
+    """
     start_time = time.monotonic()
 
     # --- Language Processing ---
+    language, query = process_language_from_query(query)
+
+    # --- Query Sanitization and Phrase Search ---
+    clean_query = query.strip()
+    # If the query contains spaces, wrap it in quotes for phrase search
+    if ' ' in clean_query:
+        search_query = f'"{clean_query}"'
+    else:
+        search_query = clean_query
+
+    # --- Aggregation Pipeline Construction ---
+    pipeline = []
+
+    # Match stage: Use text search
+    match_criteria = {'$text': {'$search': search_query}}
+
+    # Language filtering
+    if language:
+        lang_filter = build_language_filter(language)
+        match_criteria = {'$and': [match_criteria, lang_filter]}
+
+    pipeline.append({'$match': match_criteria})
+
+    # Add fields for scoring and sorting
+    pipeline.append({
+        '$addFields': {
+            'text_score': {'$meta': 'textScore'},
+            'word_count': {'$size': {'$split': ["$file_name", " "]}}
+        }
+    })
+
+    # Sort stage: Two-level sorting
+    pipeline.append({
+        '$sort': {
+            'text_score': -1,  # Primary sort: by relevance
+            'word_count': 1    # Secondary sort: by title length (fewer words is better)
+        }
+    })
+
+    # --- Execute Pipeline and Paginate ---
+    try:
+        # To get the total count, we run a separate count pipeline
+        count_pipeline = pipeline + [{'$count': 'total'}]
+
+        # Execute for each collection and combine
+        total_results = 0
+        all_files = []
+
+        for collection in [col, sec_col] if MULTIPLE_DATABASE else [col]:
+            # Get total count from this collection
+            count_cursor = collection.aggregate(count_pipeline)
+            try:
+                total_results += next(count_cursor)['total']
+            except StopIteration:
+                pass # No results in this collection
+
+            # Get paginated results from this collection
+            paginated_pipeline = pipeline + [{'$skip': offset}, {'$limit': max_results}]
+            all_files.extend(list(collection.aggregate(paginated_pipeline)))
+
+        # If using multiple databases, we need to re-sort and paginate the combined results
+        if MULTIPLE_DATABASE and len(all_files) > 0:
+            all_files.sort(key=lambda x: (x.get('text_score', 0), -x.get('word_count', float('inf'))), reverse=True)
+            files = all_files[offset : offset + max_results]
+        else:
+            files = all_files
+
+        current_fetched = len(files)
+        next_offset = offset + current_fetched if total_results > offset + current_fetched else ""
+
+        duration_ms = int((time.monotonic() - start_time) * 1000)
+        logger.info(
+            "get_search_results stats | query='%s' | total=%s | next_offset=%s | duration_ms=%s",
+            clean_query, total_results, next_offset, duration_ms
+        )
+
+        return files, next_offset, total_results, clean_query
+
+    except Exception as e:
+        logger.exception(f"Aggregation pipeline failed for query='{query}': {e}")
+        return [], 0, 0, query
+
+def process_language_from_query(query):
+    """Extracts language from query and returns the language and cleaned query."""
     language = None
     language_token = None
     query_parts = query.lower().split()
@@ -195,73 +291,22 @@ async def get_search_results(chat_id, query, file_type=None, max_results=10, off
                 break
         if language:
             break
-
     if language_token:
         query_parts.remove(language_token)
         query = " ".join(query_parts)
+    return language, query
 
-    # Clean query for search
-    clean_query = query.strip()
-
-    # --- Main Query Processing ---
-    filter_criteria = {'$text': {'$search': clean_query}}
-
-    # --- Language Filtering ---
+def build_language_filter(language):
+    """Builds the language filter part of the MongoDB query."""
     if language and language != "english":
         lang_regex = re.compile(get_language_regex(language), re.IGNORECASE)
-        filter_criteria = {'$and': [filter_criteria, {'$or': [{'file_name': lang_regex}, {'caption': lang_regex}]}]}
+        return {'$or': [{'file_name': lang_regex}, {'caption': lang_regex}]}
     elif language == "english":
         all_other_lang_tokens = [token for lang, tokens in LANGUAGES.items() if lang != 'english' for token in tokens]
         other_langs_regex_pattern = r'(?:^|[^a-zA-Z0-9])(' + '|'.join(map(re.escape, all_other_lang_tokens)) + r')(?:$|[^a-zA-Z0-9])'
         other_langs_regex = re.compile(other_langs_regex_pattern, re.IGNORECASE)
-        filter_criteria = {'$and': [filter_criteria, {'$nor': [{'file_name': other_langs_regex}, {'caption': other_langs_regex}]}]}
-
-    # Get total count for pagination
-    total_results = 0
-    try:
-        total_results += col.count_documents(filter_criteria)
-        if MULTIPLE_DATABASE:
-            total_results += sec_col.count_documents(filter_criteria)
-    except Exception as e:
-        logger.exception(f"Count documents failed | query='{query}'")
-
-    # Fetch paginated results
-    files = []
-
-    # Define the projection to include the text score for sorting
-    projection = {'score': {'$meta': 'textScore'}}
-    sort_order = [('score', {'$meta': 'textScore'})]
-
-    # Function to fetch from a single collection
-    def fetch_from_collection(collection):
-        try:
-            return list(collection.find(filter_criteria, projection).sort(sort_order))
-        except Exception as e:
-            logger.exception(f"DB find failed | query='{query}' | collection='{collection.name}'")
-            return []
-
-    all_files = fetch_from_collection(col)
-    if MULTIPLE_DATABASE:
-        all_files.extend(fetch_from_collection(sec_col))
-        # Sort combined results by score
-        all_files.sort(key=lambda x: x.get('score', 0), reverse=True)
-
-    # Apply pagination to the combined and sorted list
-    files = all_files[offset : offset + max_results]
-
-    current_fetched = len(files)
-    next_offset = offset + current_fetched if total_results > offset + current_fetched else ""
-
-    duration_ms = int((time.monotonic() - start_time) * 1000)
-    logger.info(
-        "get_search_results stats | query='%s' | total=%s | next_offset=%s | duration_ms=%s",
-        query,
-        total_results,
-        next_offset,
-        duration_ms,
-    )
-
-    return files, next_offset, total_results, clean_query
+        return {'$nor': [{'file_name': other_langs_regex}, {'caption': other_langs_regex}]}
+    return {}
 
 
 async def get_bad_files(query, file_type=None, use_filter=False):
