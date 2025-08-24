@@ -202,12 +202,21 @@ async def get_search_results(chat_id, query, file_type=None, max_results=10, off
     clean_query = ' '.join([word for word in query.strip().lower().split() if word not in STOP_WORDS])
 
     # --- Pattern Detection ---
-    pattern_regex = detect_and_build_pattern_regex(clean_query)
+    pattern_regex, text_part = extract_pattern_and_text(clean_query)
 
     if pattern_regex:
         # --- Execute Pattern-Based Search (Regex) ---
         search_type = "PATTERN"
-        filter_criteria = {'$or': [{'file_name': pattern_regex}, {'caption': pattern_regex}]}
+
+        # Build a compound query to match both text and pattern
+        text_regex = re.compile(r'\b' + re.escape(text_part) + r'\b', re.IGNORECASE) if text_part else None
+
+        filter_conditions = [{'$or': [{'file_name': pattern_regex}, {'caption': pattern_regex}]}]
+        if text_regex:
+            filter_conditions.append({'$or': [{'file_name': text_regex}, {'caption': text_regex}]})
+
+        filter_criteria = {'$and': filter_conditions} if len(filter_conditions) > 1 else filter_conditions[0]
+
         if language:
             lang_filter = build_language_filter(language)
             filter_criteria = {'$and': [filter_criteria, lang_filter]}
@@ -217,7 +226,7 @@ async def get_search_results(chat_id, query, file_type=None, max_results=10, off
             if MULTIPLE_DATABASE:
                 total_results += sec_col.count_documents(filter_criteria)
 
-            # Fetch, sort by word count, then paginate
+            # Fetch and paginate
             all_files = []
             for collection in [col, sec_col] if MULTIPLE_DATABASE else [col]:
                 all_files.extend(list(collection.find(filter_criteria)))
@@ -232,7 +241,7 @@ async def get_search_results(chat_id, query, file_type=None, max_results=10, off
         # --- Execute Text-Based Search (Aggregation) ---
         search_type = "TEXT"
         # If the query contains spaces, wrap it in quotes for phrase search
-        search_query = f'"{clean_query}"' if ' ' in clean_query else clean_query
+        search_query = f'"{text_part}"' if ' ' in text_part else text_part
 
         pipeline = []
         match_criteria = {'$text': {'$search': search_query}}
@@ -314,34 +323,38 @@ def build_language_filter(language):
         return {'$nor': [{'file_name': other_langs_regex}, {'caption': other_langs_regex}]}
     return {}
 
-def detect_and_build_pattern_regex(query_text):
+def extract_pattern_and_text(query_text):
     """
-    Detects if a query is for a season/episode pattern and builds a regex for it.
-    Returns a regex object if a pattern is found, otherwise None.
+    Detects and extracts season/episode patterns from a query.
+    Returns a tuple: (pattern_regex, remaining_text) or (None, original_text).
     """
     # More comprehensive pattern for SXXEXX, SXX EXX, Season X Episode X, etc.
     se_match = re.search(r'\b(s|season)\s?(\d{1,2})[\s\._-]*(e|ep|episode)\s?(\d{1,3})\b', query_text, re.IGNORECASE)
     if se_match:
         season = int(se_match.group(2))
         episode = int(se_match.group(4))
-        # Build a flexible regex for this specific S/E combination
         s_str, s0_str = f"{season:01d}", f"{season:02d}"
         e_str, e0_str = f"{episode:01d}", f"{episode:02d}"
-        # This regex is very flexible: allows for "S01E01", "S01 E01", "S01EP01", "S01 EP 01", etc.
-        pattern = f"S(0?{s_str}|{s0_str})[\\s\\._-]*?(E|EP)?[\\s\\._-]*?(0?{e_str}|{e0_str})"
-        return re.compile(pattern, re.IGNORECASE)
+        pattern_str = f"S(0?{s_str}|{s0_str})[\\s\\._-]*?(E|EP)?[\\s\\._-]*?(0?{e_str}|{e0_str})"
+        pattern_regex = re.compile(pattern_str, re.IGNORECASE)
+
+        # Extract the remaining text
+        remaining_text = query_text.replace(se_match.group(0), "").strip()
+        return pattern_regex, remaining_text
 
     # Pattern for just a season, like "S01" or "Season 1"
     s_match = re.search(r'\b(s|season)\s?(\d{1,2})\b', query_text, re.IGNORECASE)
     if s_match:
         season = int(s_match.group(2))
         s_str, s0_str = f"{season:01d}", f"{season:02d}"
-        # This regex finds the season. It's less specific than the S/E pattern,
-        # so the S/E pattern must be checked first.
-        pattern = f"S(0?{s_str}|{s0_str})"
-        return re.compile(pattern, re.IGNORECASE)
+        pattern_str = f"S(0?{s_str}|{s0_str})"
+        pattern_regex = re.compile(pattern_str, re.IGNORECASE)
 
-    return None
+        # Extract the remaining text
+        remaining_text = query_text.replace(s_match.group(0), "").strip()
+        return pattern_regex, remaining_text
+
+    return None, query_text
 
 
 async def get_bad_files(query, file_type=None, use_filter=False):
